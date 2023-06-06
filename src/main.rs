@@ -96,7 +96,10 @@ fn is_power_of_two_u64(n: u64) -> bool {
     }
 })]
 
-// To-do: prove that (2n + 1) is the next valid bitfield state if n is?
+// Ensures that (2n + 1) is the next valid bitfield state if n is
+#[ensures(result && n < U64_POW_63 - 1 ==> forall(
+    |i: u64| n + 1 < i && i <= 2 * n + 1 ==> !is_power_of_two_u64(i)
+))]
 
 #[pure]
 fn is_bitfield_u64_valid(n: u64) -> bool {
