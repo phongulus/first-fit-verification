@@ -14,6 +14,7 @@ impl u64 {
     #[pure]
     #[ensures(self == 0 ==> matches!(result, None))]
     #[ensures(self > 0 ==> matches!(result, Some(_)))]
+    #[ensures(result.is_some() ==> peek_option(&result) <= 63)] // Maximum u64 value is 2 ^ 64 - 1, hence this property
     pub fn checked_ilog2(self) -> Option<u32>;
 
     #[pure]
@@ -22,10 +23,6 @@ impl u64 {
     pub fn checked_pow(self, exp: u32) -> Option<u64>;
 
     #[pure]
-    #[ensures(self == 0 ==> !result)]
-    #[ensures(self == 1 ==> result)]
-    #[ensures(self == 2 ==> result)]
-    #[ensures(self > 1 && self % 2 != 0 ==> !result)]
     pub fn is_power_of_two(self) -> bool;
 }
 
@@ -34,23 +31,28 @@ impl u64 {
 #[ensures(n == 1 ==> result)]
 #[ensures(n == 2 ==> result)]
 
-// #[ensures(n > 1 && n % 2 != 0 ==> !result)] // Somehow this affects check_first_fit_overlap_and_alignment????
+#[ensures(result && n < U64_POW_63 ==>              // Induction hypothesis: if n is a power of 2 then (n * 2) must be as well
+            is_power_of_two_u64(n * 2))]            // This applies when n < 2 ^ 63, since that's the maximum possible
+                                                    // power of 2.
 
-#[ensures(result && n < U64_POW_63 ==>              // Induction hypothesis;
-            is_power_of_two_u64(n * 2))]            // if n is a power of 2 then (n * 2) must be as well
+#[ensures(result ==> n.checked_ilog2().is_some())]  // See assurances for checked_ilog2 above. If n is a
+                                                    // power of 2, it must be non-zero. Therefore, its integer log
+                                                    // must exist.
+
+#[ensures(result ==> {                              // Since we can take the log of n as seen above, we can also raise 2 to
+    let l = n.checked_ilog2();                      // that power without overflow (since the maximum that checked_ilog2
+    2u64.checked_pow(peek_option(&l)).is_some()     // returns is 63)
+})]
 
 #[ensures(result ==> {                              // If n is a power of 2,
-    let l = n.checked_ilog2();                      // we should be able to take the integer log2 of n, 
-    l.is_some() ==> {
-        let p = 2u64.checked_pow(peek_option(&l)); // and raise 2 to the power of that
-        p.is_some() ==> peek_option(&p) == n       // to obtain n again.
-    }
+    let l = n.checked_ilog2();                      // we should be able to take the integer log2 of n,
+    let p = 2u64.checked_pow(peek_option(&l));      // and raise 2 to the power of that
+    peek_option(&p) == n                            // to obtain n again.
 })]
 
 // If n is a power of 2, then there are no powers of 2 between n and n * 2 exclusive.
-#[ensures(forall(
-    |i: u64| (i > U64_POW_63 ==> !is_power_of_two_u64(i))
-))]
+#[ensures(n > U64_POW_63 ==> !result)]
+#[ensures(n == U64_POW_63 ==> result)]
 #[ensures(result && n < U64_POW_63 ==> forall(
     |i: u64| (n < i && i < n * 2 ==> !is_power_of_two_u64(i))
 ))]
@@ -60,8 +62,6 @@ impl u64 {
 fn is_power_of_two_u64(n: u64) -> bool {
     u64::is_power_of_two(n)
 }
-
-
 
 // #[ensures(n == 0 ==> result)]
 // #[ensures(n == 1 ==> result)]
@@ -80,7 +80,7 @@ fn is_power_of_two_u64(n: u64) -> bool {
 #[ensures(n == U64_MAX ==> result)]
 #[ensures(result && n < U64_MAX ==> is_power_of_two_u64(n + 1))]
 
-// Ensures the next valid bitfield is (2n + 1).
+// Ensures that (2n + 1) is a valid bitfield state if n is.
 // Need separate cases for when 2 * n + 1 == U64_MAX and when 2 * n + 1 < U64_MAX
 #[ensures(n == U64_POW_63 - 1 ==> 2 * n + 1 == U64_MAX)]
 #[ensures(n < U64_POW_63 - 1 ==> 2 * n + 1 < U64_MAX)]
@@ -96,35 +96,38 @@ fn is_power_of_two_u64(n: u64) -> bool {
     }
 })]
 
+// To-do: prove that (2n + 1) is the next valid bitfield state if n is?
+
 #[pure]
 fn is_bitfield_u64_valid(n: u64) -> bool {
     if n == U64_MAX {true} else {is_power_of_two_u64(n + 1)}
 }
 
-// #[pure]
 // Basic assurances
 #[requires(u < U64_MAX)]
-#[ensures(u <= U64_POW_63 - 1)]
 #[requires(is_bitfield_u64_valid(u))]
-#[ensures(is_bitfield_u64_valid(2 * u + 1))]
 #[requires(is_power_of_two_u64(u + 1))]
+#[requires(is_bitfield_u64_valid(2 * u + 1))]
+
+// Sanity check: we can raise 2 to the power of result
+#[ensures(2u64.checked_pow(result as u32).is_some())]
 
 // Sanity check: 2 ^ result = n + 1
 #[ensures({
     let p = 2u64.checked_pow(result as u32);
-    p.is_some() ==> peek_option(&p) == u + 1
+    peek_option(&p) == u + 1
 })]
 
 // Check that u + 2 ^ result is a valid bitfield
 #[ensures(
     {let p = 2u64.checked_pow(result as u32);
-    p.is_some() ==> is_bitfield_u64_valid(u + peek_option(&p))}
+    is_bitfield_u64_valid(u + peek_option(&p))}
 )]
 
 // Check that u + 2 ^ result == 2 * u + 1 (same as above)
 #[ensures(
     {let p = 2u64.checked_pow(result as u32);
-    p.is_some() ==> u + peek_option(&p) == 2 * u + 1}
+    u + peek_option(&p) == 2 * u + 1}
 )]
 fn first_fit_idx(u: u64) -> u64 {
     match (u + 1).checked_ilog2() {
@@ -133,7 +136,6 @@ fn first_fit_idx(u: u64) -> u64 {
     }
 }
 
-// Problematic with is_power_of_2 function, somehow. Check again.
 // #[requires(layout.size() > 0)]
 // #[requires(layout.align() > 0)]
 // fn check_first_fit_overlap_and_alignment(
@@ -157,6 +159,7 @@ fn first_fit_in_u64 (
     layout: Layout,
     page_size: usize,
     metadata_size: usize
+// ) -> Option<(VerifiedOffset, VerifiedAllocationAddress)> {
 ) -> Option<(usize, usize)> {
     let first_free = first_fit_idx(u) as usize;
     let idx = base_idx * 64 + first_free;
@@ -172,6 +175,10 @@ fn first_fit_in_u64 (
     //     None
     // }
 }
+
+// struct VerifiedOffset(usize);
+// struct VerifiedAllocationAddress(usize);
+
 
 fn main() {
     // println!("{}", u64::max_value() >> 62); // Rust caching bug? try shifting by 64, then 63, then 62, then 63 again.
