@@ -183,11 +183,13 @@ fn first_fit_in_u64 (
 fn main() {
     // println!("{}", u64::max_value() >> 62); // Rust caching bug? try shifting by 64, then 63, then 62, then 63 again.
     
-    let layout = Layout::from_size_align(2, 4);
-    let u = 7u64;
-    if is_bitfield_u64_valid(u) && u < U64_MAX {
-        let _ = first_fit_in_u64(u, 5, 20, layout, 6, 5);
-    };
+    let layout_maybe = Layout::from_size_align(2, 4);
+    if let Some(layout) = layout_maybe {
+        let u = 7u64;
+        if is_bitfield_u64_valid(u) && u < U64_MAX {
+            let _ = first_fit_in_u64(u, 5, 20, layout, 6, 5);
+        };
+    }
 }
 
 // https://stackoverflow.com/questions/600293/how-to-check-if-a-number-is-a-power-of-2

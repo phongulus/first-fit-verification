@@ -1,4 +1,5 @@
 use prusti_contracts::*;
+use crate::external_spec::{trusted_option::*};
 
 #[extern_spec]
 impl usize {
@@ -13,7 +14,7 @@ impl usize {
 
 // #[ensures(align > 0)]
 // #[ensures(size > 0)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Layout {
     align: usize,
     size: usize
@@ -25,29 +26,27 @@ impl Layout {
     /// - align is a power of 2
     /// - size > 0
     /// - size is a multiple of align
-    #[requires(size > 0)]
-    #[requires(align > 0)]
-    #[requires(usize::is_power_of_two(align))]
-    #[requires(size % align == 0)]
-    #[ensures(result.size > 0)]
-    #[ensures(result.align > 0)]
-    // #[ensures(result.align.is_power_of_two())]
-    #[ensures(result.size % result.align == 0)]
-    pub fn from_size_align(align: usize, size: usize) -> Layout {
-        Layout { align, size }
+    #[ensures(result.is_some() ==> {
+        size > 0 && align > 0 && align.is_power_of_two() && size % align == 0
+    })]
+    #[ensures(result.is_some() ==> {
+        peek_option(&result).size > 0 &&
+        peek_option(&result).align > 0 &&
+        peek_option(&result).align.is_power_of_two() &&
+        peek_option(&result).size % peek_option(&result).align == 0
+    })]
+    pub fn from_size_align(align: usize, size: usize) -> Option<Layout> {
+        if size > 0 && align > 0 && align.is_power_of_two() && size % align == 0 {
+            Some(Layout { align, size })
+        } else {None}
     }
 
     #[pure]
-    // #[requires(self.size > 0)]
-    // #[ensures(result > 0)]
-    // #[ensures(self.size == old(self.size))]
     pub fn size(&self) -> usize {
         self.size
     }
 
     #[pure]
-    // #[ensures(result > 0)]
-    // #[requires(self.align > 0)]
     pub fn align(&self) -> usize {
         self.align
     }
