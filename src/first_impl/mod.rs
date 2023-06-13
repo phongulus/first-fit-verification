@@ -1,26 +1,9 @@
 use prusti_contracts::*;
 use crate::my_layout::Layout;
-use crate::external_spec::trusted_option::*;
+use crate::external_spec::{trusted_option::*, trusted_u64::*};
 
 const U64_MAX: u64 = 18_446_744_073_709_551_615u64;
 const U64_POW_63: u64 = 9_223_372_036_854_775_808u64;
-
-#[extern_spec]
-impl u64 {
-    #[pure]
-    #[ensures(self == 0 ==> matches!(result, None))]
-    #[ensures(self > 0 ==> matches!(result, Some(_)))]
-    #[ensures(result.is_some() ==> peek_option(&result) <= 63)] // Maximum u64 value is 2 ^ 64 - 1, hence this property
-    pub fn checked_ilog2(self) -> Option<u32>;
-
-    #[pure]
-    #[ensures(exp > 63 ==> matches!(result, None))]
-    #[ensures(exp <= 63 ==> matches!(result, Some(_)))]
-    pub fn checked_pow(self, exp: u32) -> Option<u64>;
-
-    #[pure]
-    pub fn is_power_of_two(self) -> bool;
-}
 
 // Base cases
 #[ensures(n == 0 ==> !result)]
