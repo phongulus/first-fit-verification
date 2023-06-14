@@ -1,6 +1,6 @@
 use prusti_contracts::*;
 use crate::my_layout::Layout;
-use crate::external_spec::{trusted_option::*, trusted_u64::*};
+use crate::external_spec::{trusted_option::*, trusted_num::*};
 
 const U64_MAX: u64 = 18_446_744_073_709_551_615u64;
 const U64_POW_63: u64 = 9_223_372_036_854_775_808u64;
