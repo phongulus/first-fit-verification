@@ -65,12 +65,12 @@ fn make_trailing_zeros_u64(n: u32) -> u64 {
 
 // Are the Prusti assertions inside the function enough to guarantee correctness?
 // Or do we still need more postconditions?
-#[requires(for_size > 0)]
-#[requires(capacity > 0)]
+// #[requires(for_size > 0)]
+// #[requires(capacity > 0)]
 #[requires(bitfield.len() > 0)]
 #[ensures(bitfield.len() == old(bitfield.len()))]
-fn initialize(bitfield: &mut [u64], for_size: usize, capacity: usize) {
-    let relevant_bits = core::cmp::min(capacity / for_size, bitfield.len() * 64);
+fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
+    // let relevant_bits = core::cmp::min(capacity / for_size, bitfield.len() * 64);
 
     let mut i: usize = 0;
     while i < bitfield.len() {
@@ -88,16 +88,18 @@ fn initialize(bitfield: &mut [u64], for_size: usize, capacity: usize) {
         prusti_assert!((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0);
         prusti_assert!(i * 64 <= relevant_bits && (i + 1) * 64 > relevant_bits ==>
             bitfield[i].trailing_zeros() == peek_option(&remaining_bits_opt) as u32);
-        
+
         i += 1;
     }
 }
 
 #[pure]
 #[requires(bitfield.len() > 0)]
-#[requires(idx < bitfield.len() * 64)]
-fn is_allocated(bitfield: &[u64], idx: usize) -> bool {
-    is_allocated_u64(&bitfield[idx / 64], idx % 64)
+// #[requires(idx < bitfield.len() * 64)]
+fn is_allocated(bitfield: &[u64], idx: usize) -> Option<bool> {
+    if idx < bitfield.len() * 64 {
+        Some(is_allocated_u64(&bitfield[idx / 64], idx % 64))
+    } else {None}
 }
 
 #[ensures(!result ==> exists(|i: usize| (bitfield[i] < U64_MAX)))]
@@ -120,7 +122,7 @@ fn is_full(bitfield: &[u64]) -> bool {
 }
 
 #[requires(bitfield.len() > 0)]
-#[requires(relevant_bits < bitfield.len() * 64)]
+#[requires(relevant_bits <= bitfield.len() * 64)]
 // #[ensures(result ==> forall(|i: usize| (i * 64 <= relevant_bits ==> forall(|j: usize| (j < i ==> bitfield[j] == 0)))))]
 // #[ensures(forall(|i: usize| (i < bitfield.len() && (i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0)) ==> result)]
 // #[ensures(result ==> forall(|i: usize| (i < bitfield.len() && (i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0)))]
@@ -150,64 +152,70 @@ fn all_free(bitfield: &[u64], relevant_bits: usize) -> bool {
     true
 }
 
-#[requires(idx < bitfield.len() * 64)]
-#[ensures({
+// #[requires(idx < bitfield.len() * 64)]
+#[ensures(idx < bitfield.len() * 64 ==> {
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
     let p = peek_option(&(2u64.checked_pow(bit_idx as u32)));
     (old(bitfield[base_idx]) / p) % 2 == 0 ==> bitfield[base_idx] == old(bitfield[base_idx])
 })]
-#[ensures({
+#[ensures(idx < bitfield.len() * 64 ==> {
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
     let p = peek_option(&(2u64.checked_pow(bit_idx as u32)));
     (old(bitfield[base_idx]) / p) % 2 == 1 ==> bitfield[base_idx] < old(bitfield[base_idx])
 })]
-#[ensures({
+#[ensures(idx < bitfield.len() * 64 ==> {
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
     let p = peek_option(&(2u64.checked_pow(bit_idx as u32)));
     (old(bitfield[base_idx]) / p) % 2 == 1 ==>
         old(bitfield[base_idx]) - bitfield[base_idx] == p
 })]
-fn clear_bit(bitfield: &mut [u64], idx: usize) {
+fn clear_bit(bitfield: &mut [u64], idx: usize) -> Option<bool> {
+    if idx >= bitfield.len() * 64 {return None}
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
     let mut b_u64 = bitfield[base_idx];
     clear_bit_u64(&mut b_u64, bit_idx);
+    let ret = bitfield[base_idx] == b_u64;
     bitfield[base_idx] = b_u64;
+    Some(ret)
 
     // The above should be equivalent to this line below, but this cannot be
     // verified due to Prusti's limitations.
     // clear_bit_u64(&mut bitfield[idx / 64], idx % 64);
 }
 
-#[requires(idx < bitfield.len() * 64)]
-#[ensures({
+// #[requires(idx < bitfield.len() * 64)]
+#[ensures(idx < bitfield.len() * 64 ==> {
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
     let p = peek_option(&(2u64.checked_pow(bit_idx as u32)));
     (old(bitfield[base_idx]) / p) % 2 == 1 ==> bitfield[base_idx] == old(bitfield[base_idx])
 })]
-#[ensures({
+#[ensures(idx < bitfield.len() * 64 ==> {
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
     let p = peek_option(&(2u64.checked_pow(bit_idx as u32)));
     (old(bitfield[base_idx]) / p) % 2 == 0 ==> bitfield[base_idx] > old(bitfield[base_idx])
 })]
-#[ensures({
+#[ensures(idx < bitfield.len() * 64 ==> {
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
     let p = peek_option(&(2u64.checked_pow(bit_idx as u32)));
     (old(bitfield[base_idx]) / p) % 2 == 0 ==>
         bitfield[base_idx] - old(bitfield[base_idx]) == p
 })]
-fn set_bit(bitfield: &mut [u64], idx: usize) {
+fn set_bit(bitfield: &mut [u64], idx: usize) -> Option<bool> {
+    if idx >= bitfield.len() * 64 {return None}
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
     let mut b_u64 = bitfield[base_idx];
     set_bit_u64(&mut b_u64, bit_idx);
+    let ret = bitfield[base_idx] == b_u64;
     bitfield[base_idx] = b_u64;
+    Some(ret)
 
     // The above should be equivalent to this line below, but this cannot be
     // verified due to Prusti's limitations.
@@ -269,49 +277,46 @@ fn first_fit(
     None
 }
 
-pub struct TrustedBitfield8{bitfield: [u64; 8]}
+#[invariant(self.layout.size() > 0)]
+#[invariant(self.layout.align() > 0)]
+#[invariant(self.relevant_bits <= self.bitfield.len() * 64)]
+pub struct TrustedBitfield8 {  // Change name for other bitfield types
+    bitfield: [u64; 8],  // Change this for other bitfield sizes
+    relevant_bits: usize,
+    base_addr: usize,
+    layout: Layout,
+    page_size: usize,
+    metadata_size: usize
+}
 
 impl TrustedBitfield8 {
-    pub fn new(for_size: usize, capacity: usize) -> Option<Self> {
-        if for_size > 0 && capacity > 0 && for_size < capacity {
-            let mut bitfield = TrustedBitfield8{ bitfield: [0, 0, 0, 0, 0, 0, 0, 0] };
-            let () = initialize(&mut bitfield.bitfield, for_size, capacity);
-            Some(bitfield)
-        } else {None}
-    }
-
-    #[requires(for_size > 0)]
-    #[requires(capacity > 0)]
-    #[requires(self.bitfield.len() > 0)]
-    pub fn initialize(&mut self, for_size: usize, capacity: usize) {initialize(&mut self.bitfield, for_size, capacity)}
-
-    #[requires(layout.size() > 0)]
-    #[requires(layout.align() > 0)]
-    fn first_fit(
-        &self,
+    pub fn new(
+        for_size: usize,
+        capacity: usize,
         base_addr: usize,
         layout: Layout,
         page_size: usize,
-        metadata_size: usize,
-    ) -> Option<(usize, usize)> {
-        first_fit(&self.bitfield, base_addr, layout, page_size, metadata_size)
+        metadata_size: usize
+    ) -> Option<Self> {
+        if for_size > 0 && capacity > 0 && for_size < capacity {
+            let mut bitfield = [0, 0, 0, 0, 0, 0, 0, 0];  // Change this for other bitfield sizes
+            let available_bits = bitfield.len() * 64;
+            let wanted_bits = capacity / for_size;
+            let relevant_bits = if wanted_bits <= available_bits {wanted_bits} else {available_bits};
+            let mut trusted_bitfield = TrustedBitfield8 {  // Change this for other bitfield types
+                bitfield, relevant_bits, base_addr, layout, page_size, metadata_size
+            };
+            trusted_bitfield.initialize();
+            Some(trusted_bitfield)
+        } else {None}
     }
-
-    #[requires(self.bitfield.len() > 0)]
-    #[requires(idx < self.bitfield.len() * 64)]
-    fn is_allocated(&self, idx: usize) -> bool {is_allocated(&self.bitfield, idx)}
-
-    #[requires(idx < self.bitfield.len() * 64)]
-    fn set_bit(&mut self, idx: usize) {set_bit(&mut self.bitfield, idx)}
-
-    #[requires(idx < self.bitfield.len() * 64)]
-    fn clear_bit(&mut self, idx: usize) {clear_bit(&mut self.bitfield, idx)}
-
-    fn is_full(&self) -> bool {is_full(&self.bitfield)}
-
-    #[requires(self.bitfield.len() > 0)]
-    #[requires(relevant_bits < self.bitfield.len() * 64)]
-    fn all_free(&self, relevant_bits: usize) -> bool {all_free(&self.bitfield, relevant_bits)}
+    pub fn initialize(&mut self) {initialize(&mut self.bitfield, self.relevant_bits)}
+    pub fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout, self.page_size, self.metadata_size)}
+    pub fn is_allocated(&self, idx: usize) -> Option<bool> {is_allocated(&self.bitfield, idx)}
+    pub fn set_bit(&mut self, idx: usize) -> Option<bool> {set_bit(&mut self.bitfield, idx)}
+    pub fn clear_bit(&mut self, idx: usize) -> Option<bool> {clear_bit(&mut self.bitfield, idx)}
+    pub fn is_full(&self) -> bool {is_full(&self.bitfield)}
+    pub fn all_free(&self) -> bool {all_free(&self.bitfield, self.relevant_bits)}
 }
 
 // impl TrustedBitfield8 {

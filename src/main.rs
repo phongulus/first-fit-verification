@@ -26,6 +26,7 @@ fn main() {
             let _ = first_impl::first_fit_in_u64(u, base_idx, base_addr, layout, page_size, metadata_size);
         };
 
-        let _ = second_impl::first_fit_in_u64(u, base_idx, base_addr, layout, page_size, metadata_size);
+        let _ = second_impl::TrustedBitfield8::new(8, 64, base_addr, layout, page_size, metadata_size);
+        // let _ = second_impl::first_fit_in_u64(u, base_idx, base_addr, layout, page_size, metadata_size);
     }
 }
