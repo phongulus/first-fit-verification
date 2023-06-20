@@ -26,7 +26,14 @@ fn main() {
             let _ = first_impl::first_fit_in_u64(u, base_idx, base_addr, layout, page_size, metadata_size);
         };
 
-        let _ = second_impl::TrustedBitfield8::new(8, 64, base_addr, layout, page_size, metadata_size);
+        let test_bitfield_opt = second_impl::TrustedBitfield8::new(8, 64, base_addr, layout, page_size, metadata_size);
+        match test_bitfield_opt {
+            Some(test_bitfield) => test_bitfield.first_fit(),
+            None => None,
+        };
+        // assert!(test_bitfield_opt);
+        // let test_bitfield = test_bitfield_opt.unwrap();
+        // let _ = test_bitfield.first_fit();
         // let _ = second_impl::first_fit_in_u64(u, base_idx, base_addr, layout, page_size, metadata_size);
     }
 }
