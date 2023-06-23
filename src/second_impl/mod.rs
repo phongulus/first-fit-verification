@@ -11,31 +11,78 @@ const U64_MAX: u64 = 18_446_744_073_709_551_615u64;
 
 // We also have custom Prusti specs on functions `checked_pow` and `trailing_zeros`.
 
+/// We have several numerical properties associated with checking/setting/clearing
+/// a bit inside of a `u64`, which contains 64 bits. We index each bit from right to
+/// left starting at 0 up to 63 inclusive, assuming a little endian system. Although
+/// the functions themselves use bitwise operations, we can tell Prusti the numerical
+/// properties using the `trusted` function declaration followed by postconditions.
+/// 
+/// We start with the following observations - pending formally written proofs:
+/// 
+///     - Flipping a bit at index i is equivalent to adding or subtracting 2^i to/from u.
+///     This is how unsigned integers are represented in base 2 / binary.
+/// 
+///     - Given some bit at index i, all previous bits (bits at indices less than i) add up
+///     to 2^i - 1 when all flipped (we can understand this intuitively in base 10 as the number
+///     immediately before, say, 1000 being 999). When we have i = 0, then 2^i - 1 = 2^0 - 1 = 0.
+/// 
+///     - Given some bit at index i, flipping any subsequent bit (bits at indices greater
+///     than i) is adding or subtracting an even multiple of 2^i ("even multiple" here meaning
+///     the number can be written as 2k * 2^i - is there a better term for this?). This is
+///     because adding to the index i is equivalent to multiplying the 2^i term by 2 one or
+///     multiple times.
+/// 
+/// Given the above observations, we come up with the properties for flipping and checking the
+/// bits of a `u64` u:
+/// 
+///     - Setting a bit at index i is equivalent to adding 2^i to u, assuming that bit is
+///     currently 0.
+/// 
+///     - Clearing a bit at index i is equivalent to subtracting 2^i from u, assuming that bit
+///     is currently 1.
+/// 
+///     - To check whether a bit at index i is flipped, we check whether the quotient of
+///     the euclidean division of u by 2^i is divisible by 2. If yes, the bit is 0, and if
+///     not, the bit is 1.
+/// 
+///     - To check whether a bit at index i is the first free bit, i.e. the first 0 bit,
+///     We check whether the remainder of the euclidean division of u by 2^i is 2^i - 1.
+///     This works for i = 0 as well, since 2^0 = 1 and a division by 1 is always 0 - the
+///     index 0 is always first if it is free. 
+
 // TODO: Verify the trusted properties on paper or with Verus
 
 #[trusted]
-#[requires(idx < 64)]
-#[ensures({
+#[requires(idx < 64)]  // Valid index needed.
+#[ensures({  // If the bit is previously set, there should be no change to u.
     let p = peek_option(&2u64.checked_pow(idx as u32));
     (old(*u) / p) % 2 == 1 ==> old(*u) == *u
 })]
-#[ensures({
+#[ensures({  // If the bit is not set, u should be changed to u + 2^idx.
     let p = peek_option(&2u64.checked_pow(idx as u32));
     (old(*u) / p) % 2 == 0 ==> old(*u) + p == *u
+})]
+#[ensures({  // Regardless of whether u is updated or not, the bit should be 1 when the function returns.
+    let p = peek_option(&2u64.checked_pow(idx as u32));
+    (*u / p) % 2 == 1
 })]
 fn set_bit_u64(u: &mut u64, idx: usize) {
     *u = *u | (1 << idx);
 }
 
 #[trusted]
-#[requires(idx < 64)]
-#[ensures({
+#[requires(idx < 64)]  // Valid index needed.
+#[ensures({  // If the bit is previously cleared, there should be no change to u.
     let p = peek_option(&2u64.checked_pow(idx as u32));
     (old(*u) / p) % 2 == 0 ==> old(*u) == *u
 })]
-#[ensures({
+#[ensures({  // If the bit is set, u should be changed to u - 2^idx.
     let p = peek_option(&2u64.checked_pow(idx as u32));
     (old(*u) / p) % 2 == 1 ==> old(*u) - p == *u
+})]
+#[ensures({  // Regardless of whether u is updated or not, the bit should be 0 when the function returns.
+    let p = peek_option(&2u64.checked_pow(idx as u32));
+    (*u / p) % 2 == 0
 })]
 fn clear_bit_u64(u: &mut u64, idx: usize) {
     *u = *u & !(1 << idx);
@@ -43,18 +90,18 @@ fn clear_bit_u64(u: &mut u64, idx: usize) {
 
 #[pure]
 #[trusted]
-#[requires(idx < 64)]
-// #[requires(2u64.checked_pow(idx as u32).is_some())]
-#[requires(forall (|i: usize| i == idx ==> 2u64.checked_pow(i as u32).is_some()))]
-#[ensures(result ==> (*u / peek_option(&2u64.checked_pow(idx as u32)) % 2 == 1))]
+#[requires(idx < 64)]  // Valid index needed.
+#[requires(forall (|i: usize| i == idx ==> 2u64.checked_pow(i as u32).is_some()))]  // Ditto
+#[ensures(result ==> (*u / peek_option(&2u64.checked_pow(idx as u32)) % 2 == 1))]  // Check for allocated
+#[ensures(!result ==> (*u / peek_option(&2u64.checked_pow(idx as u32)) % 2 == 0))]  // Check for not allocated
 fn is_allocated_u64(u: &u64, idx: usize) -> bool {
     *u & (1 << idx) > 0
 }
 
 #[trusted]
-#[requires(n <= 64)]
-#[ensures(result.trailing_zeros() == n)]
-#[ensures(result == U64_MAX <==> n == 0)] // Cannot be enforced as part of trailing_zeros
+#[requires(n <= 64)]  // Ensures valid input: we can have 64 trailing zeros at most for a 64-bit number.
+#[ensures(result.trailing_zeros() == n)]  
+#[ensures(result == U64_MAX <==> n == 0)]  // Cannot be enforced as part of trailing_zeros
 fn make_trailing_zeros_u64(n: u32) -> u64 {
     if n == 64 {0}
     else {
@@ -65,11 +112,11 @@ fn make_trailing_zeros_u64(n: u32) -> u64 {
 
 #[requires(bitfield.len() > 0)]
 #[requires(relevant_bits > 0)]
-#[requires(relevant_bits <= bitfield.len() * 64)]
-#[ensures(bitfield.len() == old(bitfield.len()))]
-#[ensures(forall(|i: usize| ((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0)))]
-#[ensures(forall(|i: usize| (i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits ==> bitfield[i].trailing_zeros() as usize == relevant_bits % 64)))]
-#[ensures(forall(|i: usize| (i < bitfield.len() && i * 64 >= relevant_bits ==> bitfield[i] == U64_MAX)))]
+#[requires(relevant_bits <= bitfield.len() * 64)]  // Relevant bits within array bounds.
+#[ensures(bitfield.len() == old(bitfield.len()))]  // No change to the length of the u64 array.
+#[ensures(forall(|i: usize| ((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0)))]  // All relevant bits in u64's before the one containing the final relevant bit must be set to 0.
+#[ensures(forall(|i: usize| (i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits ==> bitfield[i].trailing_zeros() as usize == relevant_bits % 64)))]  // The u64 containing the final relevant bit is set correctly.
+#[ensures(forall(|i: usize| (i < bitfield.len() && i * 64 >= relevant_bits ==> bitfield[i] == U64_MAX)))] // All bits after the u64 containing the final relevant bit must be set to allocated.
 fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
     let mut i: usize = 0;
     while i < bitfield.len() {
@@ -77,7 +124,6 @@ fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
         body_invariant!(i < bitfield.len());
         body_invariant!(bitfield.len() == old(bitfield.len()));
         body_invariant!(i * 64 < relevant_bits ==> forall(|j: usize| j < i ==> bitfield[j] == 0));
-        // body_invariant!(i > 0 && i * 64 == relevant_bits ==> bitfield[i - 1] == 0);
         body_invariant!(i * 64 >= relevant_bits ==> forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
         body_invariant!(i * 64 >= relevant_bits ==> forall(|j: usize| (j * 64 >= relevant_bits && j < i ==> bitfield[j] == U64_MAX)));
         body_invariant!(i * 64 >= relevant_bits ==>
@@ -85,9 +131,6 @@ fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
                 bitfield[j].trailing_zeros() as usize == relevant_bits % 64
             ))
         );
-        // body_invariant!(i * 64 >= relevant_bits ==> forall(|j: usize| (j * 64 >= relevant_bits && j < i ==> bitfield[j] == U64_MAX)));
-        // body_invariant!((i + 1) * 64 <= relevant_bits)
-        // body_invariant!(i * 64 >= relevant_bits ==> forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
 
         let bit_idx = i * 64;
         if bit_idx <= relevant_bits {
@@ -103,39 +146,11 @@ fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
                 prusti_assert!(bitfield[i].trailing_zeros() as usize == relevant_bits % 64);
             }
         } else {bitfield[i] = U64_MAX;}
-        
-        // let remaining_bits_opt = relevant_bits.checked_sub(i * 64);
-        // if let Some(remaining_bits) = remaining_bits_opt {
-        //     // prusti_assert!(remaining_bits == relevant_bits - i * 64);
-        //     // prusti_assert!(relevant_bits % 64 == (relevant_bits - i * 64) % 64);
-        //     // prusti_assert!(relevant_bits % 64 == remaining_bits % 64);
-        //     if remaining_bits >= 64 {bitfield[i] = 0;}
-        //     else {
-        //         prusti_assert!(remaining_bits < 64);
-        //         prusti_assert!(remaining_bits > 0 ==> remaining_bits == relevant_bits % 64);
-        //         prusti_assert!(remaining_bits == 0 ==> relevant_bits == i * 64);
-        //         // prusti_assert!(remaining_bits == 0 ==> relevant_bits % 64 == 0);
-        //         // prusti_assert!(remaining_bits == relevant_bits )
-        //         // prusti_assert!(remaining_bits == relevant_bits % 64);
-        //         bitfield[i] = make_trailing_zeros_u64(remaining_bits as u32);
-        //         // prusti_assert!(bitfield[i].trailing_zeros() as usize == relevant_bits % 64);
-        //     }
-        // } else {bitfield[i] = U64_MAX;}
 
         prusti_assert!(i * 64 >= relevant_bits ==> bitfield[i] == U64_MAX);
         prusti_assert!((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0);
         prusti_assert!(i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits ==>
             bitfield[i].trailing_zeros() == (relevant_bits - bit_idx) as u32);
-        // prusti_assert!(i * 64 <= relevant_bits && (i + 1) * 64 > relevant_bits ==>
-        //     bitfield[i].trailing_zeros() == peek_option(&remaining_bits_opt) as u32);
-
-        // prusti_assert!(i * 64 > relevant_bits ==)
-        // prusti_assert!(i * 64 <= relevant_bits && (i + 1) * 64 > relevant_bits ==>
-        //     relevant_bits - bit_idx == relevant_bits % 64);
-
-        // prusti_assert!((i + 1) * 64 <= relevant_bits ==> forall(|j: usize| j <= i ==> bitfield[j] == 0));
-        // prusti_assert!(i * 64 >= relevant_bits ==> forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
-        // prusti_assert!((i + 1) * 64 > relevant_bits ==> forall(|j: usize| j <= i ==> bitfield[j] == 0));
 
         i += 1;
     }
@@ -148,22 +163,11 @@ fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
             bitfield[j].trailing_zeros() as usize == relevant_bits % 64
         ))
     );
-    // prusti_assert!(forall(|j: usize) (i * 64 < relevant_bits ))
-    // prusti_assert!()
-    // prusti_assert!()
-    // prusti_assert!(relevant_bits)
-    // i -= 1;
-    // prusti_assert!(i < bitfield.len() && i * 64 > relevant_bits ==> forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
-    // prusti_assert!(i )
-    // prusti_assert!(forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> j < bitfield.len())));
-    // prusti_assert!(forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
-    // prusti_assert!(forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
 
 }
 
 #[pure]
 #[requires(bitfield.len() > 0)]
-// #[requires(idx < bitfield.len() * 64)]
 fn is_allocated(bitfield: &[u64], idx: usize) -> Option<bool> {
     if idx < bitfield.len() * 64 {
         Some(is_allocated_u64(&bitfield[idx / 64], idx % 64))
@@ -239,7 +243,6 @@ fn all_free(bitfield: &[u64], relevant_bits: usize) -> bool {
     true
 }
 
-// #[requires(idx < bitfield.len() * 64)]
 #[ensures(idx < bitfield.len() * 64 ==> {  // Check that the bitfield isn't changed if the bit
     let base_idx = idx / 64;               // is already 0.
     let bit_idx = idx % 64;
@@ -308,9 +311,8 @@ fn set_bit(bitfield: &mut [u64], idx: usize) -> Option<bool> {
     // set_bit_u64(&mut bitfield[idx / 64], idx % 64);
 }
 
-// #[pure]
 #[requires(u < U64_MAX)]
-#[ensures(result < 64)]
+#[ensures(result < 64)]  // Correct range for result
 #[ensures({
     let p = peek_option(&2u64.checked_pow(result));
     u / p % 2 == 0  // Check that the result index is availble
@@ -327,6 +329,18 @@ fn first_fit_idx(u: u64) -> u32 {
 #[requires(layout.size() > 0)]
 #[requires(layout.align() > 0)]
 #[requires(u < U64_MAX)]
+#[ensures(result.is_some() ==> {  // The returned index should within the bounds of the current u64.
+    let (idx, addr) = peek_option(&result);
+    idx >= base_idx * 64 && idx < base_idx * 64 + 64
+})]
+#[ensures(result.is_some() ==> {  // The index is mapped to the correct address.
+    let (idx, addr) = peek_option(&result);
+    addr == base_addr + idx * layout.size()
+})]
+#[ensures(result.is_some() ==> {  // Check that the returned address does not overlap with metadata. 
+    let (idx, addr) = peek_option(&result);
+    addr - base_addr <= page_size - metadata_size - layout.size() && addr % layout.align() == 0
+})]
 pub fn first_fit_in_u64 (
     u: u64,
     base_idx: usize,
@@ -339,13 +353,27 @@ pub fn first_fit_in_u64 (
     let idx = base_idx * 64 + first_free;
     let offset = idx * layout.size();
     let addr = base_addr + offset;
-    if offset > (page_size - metadata_size - layout.size()) && addr % layout.align() == 0 {
+    if offset <= (page_size - metadata_size - layout.size()) && addr % layout.align() == 0 {
         Some((idx, addr))
     } else {None}
 }
 
 #[requires(layout.size() > 0)]
 #[requires(layout.align() > 0)]
+#[ensures(result.is_some() ==> {  // Check that the returned index is within range and that the address is correct.
+    let (idx, addr) = peek_option(&result);
+    idx < bitfield.len() * 64 && addr == base_addr + idx * layout.size()
+})]
+#[ensures(result.is_some() ==> {  // Check that the returned address does not overlap with metadata.
+    let (idx, addr) = peek_option(&result);
+    addr - base_addr <= page_size - metadata_size - layout.size() && addr % layout.align() == 0
+})]
+#[ensures(result.is_some() ==> {  // Ensure that all u64 before the returned index is full. The result being the first free bit of its u64 is already guaranteed by `first_fit_in_u64`.
+    let (idx, addr) = peek_option(&result);
+    let base_idx = idx / 64;
+    forall(|i: usize| i < base_idx ==> bitfield[i] == U64_MAX)
+})]
+#[ensures(forall(|i: usize| i < bitfield.len() ==> bitfield[i] == U64_MAX) ==> !result.is_some())]
 fn first_fit(
     bitfield: &[u64],
     base_addr: usize,
@@ -355,25 +383,40 @@ fn first_fit(
 ) -> Option<(usize, usize)> {
     let mut base_idx = 0;
     while base_idx < bitfield.len() {
+
+        body_invariant!(base_idx < bitfield.len());
+        body_invariant!(forall(|i: usize| i < base_idx ==> bitfield[i] == U64_MAX));  // All previous u64 must have max value
+
         if bitfield[base_idx] < U64_MAX {
             return first_fit_in_u64(bitfield[base_idx], base_idx, base_addr, layout, page_size, metadata_size)
         }
+
+        prusti_assert!(bitfield[base_idx] == U64_MAX);
+
         base_idx += 1;
     }
+
+    prusti_assert!(forall(|i: usize| i < bitfield.len() ==> bitfield[i] == U64_MAX));
+
     None
 }
 
-// #[invariant(self.layout.size() > 0)]
-// #[invariant(self.layout.align() > 0)]
-#[invariant(self.relevant_bits <= self.bitfield.len() * 64)]
-#[invariant(self.relevant_bits > 0)]
+
+// This code allows for easy expansion of the TrustedBitfield structs. To have trusted bitfields with longer or shorter lengths
+// than 8 * 64, simply copy paste the struct and its `impl` block and rename and change size where needed. The new trusted bitfields
+// will have the same correctness guarantees as TrustedBitfield8.
+
+#[invariant(self.relevant_bits <= self.bitfield.len() * 64)]  // The number of used bits cannot exceed the maximum number of available bits.
+#[invariant(self.relevant_bits > 0)]  // The number of used bits should be more than 0.
+// #[invariant(self.initialized ==> forall(|i: usize| i < self.bitfield.len() && i * 64 >= self.relevant_bits ==> self.bitfield[i] == U64_MAX))]
 pub struct TrustedBitfield8 {  // Change name for other bitfield types
     bitfield: [u64; TrustedBitfield8::SIZE],  // Change name for other bitfield sizes
     relevant_bits: usize,
     base_addr: usize,
     layout: Layout,
     page_size: usize,
-    metadata_size: usize
+    metadata_size: usize,
+    initialized: bool
 }
 
 impl TrustedBitfield8 {
@@ -387,18 +430,27 @@ impl TrustedBitfield8 {
         metadata_size: usize
     ) -> Option<Self> {
         if for_size > 0 && capacity > 0 && for_size < capacity {
-            let mut bitfield = [0, 0, 0, 0, 0, 0, 0, 0];  // Change this for other bitfield sizes
+            let bitfield = [0, 0, 0, 0, 0, 0, 0, 0];  // Change this for other bitfield sizes
             let available_bits = bitfield.len() * 64;
             let wanted_bits = capacity / for_size;
             let relevant_bits = if wanted_bits <= available_bits {wanted_bits} else {available_bits};
             let mut trusted_bitfield = TrustedBitfield8 {  // Change this for other bitfield types
-                bitfield, relevant_bits, base_addr, layout, page_size, metadata_size
+                bitfield, relevant_bits, base_addr, layout, page_size, metadata_size, initialized: false
             };
             trusted_bitfield.initialize();
             Some(trusted_bitfield)
         } else {None}
     }
-    pub fn initialize(&mut self) {initialize(&mut self.bitfield, self.relevant_bits)}
+    pub fn initialize(&mut self) {
+        let bitfield_ref = &mut self.bitfield;
+        let () = initialize(bitfield_ref, self.relevant_bits);
+        prusti_assert!(self.bitfield.len() == old(self.bitfield.len()));
+        // The below does not pass?
+        // prusti_assert!(forall(|i: usize| ((i + 1) * 64 <= self.relevant_bits ==> self.bitfield[i] == 0)));
+        // prusti_assert!(forall(|i: usize| (i * 64 < self.relevant_bits && (i + 1) * 64 > self.relevant_bits ==> self.bitfield[i].trailing_zeros() as usize == self.relevant_bits % 64)));
+        // prusti_assert!(forall(|i: usize| (i < self.bitfield.len() && i * 64 >= self.relevant_bits ==> self.bitfield[i] == U64_MAX)));
+        self.initialized = true;
+    }
     pub fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout, self.page_size, self.metadata_size)}
     pub fn is_allocated(&self, idx: usize) -> Option<bool> {is_allocated(&self.bitfield, idx)}
     pub fn set_bit(&mut self, idx: usize) -> Option<bool> {set_bit(&mut self.bitfield, idx)}
@@ -668,4 +720,102 @@ impl TrustedBitfield8 {
 // // #[ensures(u < U64_MAX ==> result < 64)]
 // fn my_trailing_ones (u: u64) -> u32 {
 //     my_trailing_ones_aux(0, u)
+// }
+
+// #[requires(bitfield.len() > 0)]
+// #[requires(relevant_bits > 0)]
+// #[requires(relevant_bits <= bitfield.len() * 64)]
+// #[ensures(bitfield.len() == old(bitfield.len()))]
+// #[ensures(forall(|i: usize| ((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0)))]
+// #[ensures(forall(|i: usize| (i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits ==> bitfield[i].trailing_zeros() as usize == relevant_bits % 64)))]
+// #[ensures(forall(|i: usize| (i < bitfield.len() && i * 64 >= relevant_bits ==> bitfield[i] == U64_MAX)))]
+// fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
+//     let mut i: usize = 0;
+//     while i < bitfield.len() {
+
+//         body_invariant!(i < bitfield.len());
+//         body_invariant!(bitfield.len() == old(bitfield.len()));
+//         body_invariant!(i * 64 < relevant_bits ==> forall(|j: usize| j < i ==> bitfield[j] == 0));
+//         // body_invariant!(i > 0 && i * 64 == relevant_bits ==> bitfield[i - 1] == 0);
+//         body_invariant!(i * 64 >= relevant_bits ==> forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
+//         body_invariant!(i * 64 >= relevant_bits ==> forall(|j: usize| (j * 64 >= relevant_bits && j < i ==> bitfield[j] == U64_MAX)));
+//         body_invariant!(i * 64 >= relevant_bits ==>
+//             forall(|j: usize| (j * 64 < relevant_bits && (j + 1) * 64 > relevant_bits && j < i ==>
+//                 bitfield[j].trailing_zeros() as usize == relevant_bits % 64
+//             ))
+//         );
+//         // body_invariant!(i * 64 >= relevant_bits ==> forall(|j: usize| (j * 64 >= relevant_bits && j < i ==> bitfield[j] == U64_MAX)));
+//         // body_invariant!((i + 1) * 64 <= relevant_bits)
+//         // body_invariant!(i * 64 >= relevant_bits ==> forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
+
+//         let bit_idx = i * 64;
+//         if bit_idx <= relevant_bits {
+//             let remaining_bits = relevant_bits - bit_idx;
+//             prusti_assert!(remaining_bits == relevant_bits - bit_idx);
+//             prusti_assert!(relevant_bits % 64 == (relevant_bits - bit_idx) % 64);
+//             prusti_assert!(relevant_bits % 64 == remaining_bits % 64);
+//             prusti_assert!(remaining_bits < 64 ==> relevant_bits % 64 == remaining_bits);
+//             if remaining_bits >= 64 {bitfield[i] = 0;}
+//             else {
+//                 bitfield[i] = make_trailing_zeros_u64(remaining_bits as u32);
+//                 prusti_assert!(bitfield[i].trailing_zeros() as usize == remaining_bits);
+//                 prusti_assert!(bitfield[i].trailing_zeros() as usize == relevant_bits % 64);
+//             }
+//         } else {bitfield[i] = U64_MAX;}
+        
+//         // let remaining_bits_opt = relevant_bits.checked_sub(i * 64);
+//         // if let Some(remaining_bits) = remaining_bits_opt {
+//         //     // prusti_assert!(remaining_bits == relevant_bits - i * 64);
+//         //     // prusti_assert!(relevant_bits % 64 == (relevant_bits - i * 64) % 64);
+//         //     // prusti_assert!(relevant_bits % 64 == remaining_bits % 64);
+//         //     if remaining_bits >= 64 {bitfield[i] = 0;}
+//         //     else {
+//         //         prusti_assert!(remaining_bits < 64);
+//         //         prusti_assert!(remaining_bits > 0 ==> remaining_bits == relevant_bits % 64);
+//         //         prusti_assert!(remaining_bits == 0 ==> relevant_bits == i * 64);
+//         //         // prusti_assert!(remaining_bits == 0 ==> relevant_bits % 64 == 0);
+//         //         // prusti_assert!(remaining_bits == relevant_bits )
+//         //         // prusti_assert!(remaining_bits == relevant_bits % 64);
+//         //         bitfield[i] = make_trailing_zeros_u64(remaining_bits as u32);
+//         //         // prusti_assert!(bitfield[i].trailing_zeros() as usize == relevant_bits % 64);
+//         //     }
+//         // } else {bitfield[i] = U64_MAX;}
+
+//         prusti_assert!(i * 64 >= relevant_bits ==> bitfield[i] == U64_MAX);
+//         prusti_assert!((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0);
+//         prusti_assert!(i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits ==>
+//             bitfield[i].trailing_zeros() == (relevant_bits - bit_idx) as u32);
+//         // prusti_assert!(i * 64 <= relevant_bits && (i + 1) * 64 > relevant_bits ==>
+//         //     bitfield[i].trailing_zeros() == peek_option(&remaining_bits_opt) as u32);
+
+//         // prusti_assert!(i * 64 > relevant_bits ==)
+//         // prusti_assert!(i * 64 <= relevant_bits && (i + 1) * 64 > relevant_bits ==>
+//         //     relevant_bits - bit_idx == relevant_bits % 64);
+
+//         // prusti_assert!((i + 1) * 64 <= relevant_bits ==> forall(|j: usize| j <= i ==> bitfield[j] == 0));
+//         // prusti_assert!(i * 64 >= relevant_bits ==> forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
+//         // prusti_assert!((i + 1) * 64 > relevant_bits ==> forall(|j: usize| j <= i ==> bitfield[j] == 0));
+
+//         i += 1;
+//     }
+//     prusti_assert!(i > 0);
+//     prusti_assert!(i == bitfield.len());
+//     prusti_assert!(forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
+//     prusti_assert!(forall(|j: usize| (j * 64 >= relevant_bits && j < bitfield.len() ==> bitfield[j] == U64_MAX)));
+//     prusti_assert!(
+//         forall(|j: usize| (j * 64 < relevant_bits && (j + 1) * 64 > relevant_bits ==>
+//             bitfield[j].trailing_zeros() as usize == relevant_bits % 64
+//         ))
+//     );
+//     // prusti_assert!(forall(|j: usize) (i * 64 < relevant_bits ))
+//     // prusti_assert!()
+//     // prusti_assert!()
+//     // prusti_assert!(relevant_bits)
+//     // i -= 1;
+//     // prusti_assert!(i < bitfield.len() && i * 64 > relevant_bits ==> forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
+//     // prusti_assert!(i )
+//     // prusti_assert!(forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> j < bitfield.len())));
+//     // prusti_assert!(forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
+//     // prusti_assert!(forall(|j: usize| ((j + 1) * 64 <= relevant_bits ==> bitfield[j] == 0)));
+
 // }
