@@ -22,8 +22,8 @@ fn power_of_two_u64(k: usize) -> u64 {
 #[pure]
 #[trusted]
 #[requires(idx < 64)]
-#[ensures(forall(|i: usize| i < 64 ==> is_allocated_u64(u, i)) ==> *u == U64_MAX)]
-#[ensures(!result ==> *u < U64_MAX)]
+#[ensures(forall(|i: usize| i < 64 ==> is_allocated_u64(u, i)) ==> *u == U64_MAX)]  // If all bits are set, u should be U64_MAX.
+#[ensures(!result ==> *u < U64_MAX)]  // If any bit is not set, u should be less than U64_MAX.
 fn is_allocated_u64(u: &u64, idx: usize) -> bool {
     *u & (1 << idx) > 0
 }
@@ -59,10 +59,10 @@ fn clear_bit_u64(u: &mut u64, idx: usize) {
 #[pure]
 #[trusted]
 #[requires(k <= 64)]
-#[ensures(k == 0 ==> result == U64_MAX)]
-#[ensures(k == 64 ==> result == 0)]
-#[ensures(forall(|j: usize| j < k ==> !is_allocated_u64(&result, j)))]
-#[ensures(forall(|j: usize| j >= k && j < 64 ==> is_allocated_u64(&result, j)))]
+#[ensures(k == 0 ==> result == U64_MAX)]  // If k == 0, all bits should be set.
+#[ensures(k == 64 ==> result == 0)]       // If k == 64, all bits should be cleared.
+#[ensures(forall(|j: usize| j < k ==> !is_allocated_u64(&result, j)))]  // All bits before the kth bit should be cleared.
+#[ensures(forall(|j: usize| j >= k && j < 64 ==> is_allocated_u64(&result, j)))]  // All bits including and after the kth bit should be set.
 fn make_trailing_zeros_u64(k: usize) -> u64 {
     if k == 64 {0}
     else {U64_MAX << k}
@@ -71,18 +71,18 @@ fn make_trailing_zeros_u64(k: usize) -> u64 {
 #[pure]
 #[trusted]
 #[requires(k <= 64)]
-#[ensures(k == 0 ==> result == 0)]
-#[ensures(k == 64 ==> result == U64_MAX)]
-#[ensures(forall(|j: usize| j < k ==> is_allocated_u64(&result, j)))]
-#[ensures(forall(|j: usize| j >= k && j < 64 ==> !is_allocated_u64(&result, j)))]
+#[ensures(k == 0 ==> result == 0)]  // If k == 0, all bits should be cleared.
+#[ensures(k == 64 ==> result == U64_MAX)]  // If k == 64, all bits should be set.
+#[ensures(forall(|j: usize| j < k ==> is_allocated_u64(&result, j)))]  // All bits before the kth bit should be set.
+#[ensures(forall(|j: usize| j >= k && j < 64 ==> !is_allocated_u64(&result, j)))]  // All bits including and after the kth bit should be cleared.
 fn make_trailing_ones_u64(k: usize) -> u64 {
     !make_trailing_zeros_u64(k)
 }
 
-#[ensures(result <= 64)]
-#[ensures(*u < U64_MAX ==> result < 64)]
-#[ensures(forall(|k: usize| k < result ==> is_allocated_u64(u, k)))]
-#[ensures(result < 64 ==> !is_allocated_u64(u, result))]
+#[ensures(result <= 64)]  // The result should be within the range of the u64.
+#[ensures(*u < U64_MAX ==> result < 64)]  // If u is not U64_MAX, the result should be less than 64.
+#[ensures(forall(|k: usize| k < result ==> is_allocated_u64(u, k)))]  // All bits before the result should be set.
+#[ensures(result < 64 ==> !is_allocated_u64(u, result))]  // The bit at the result position should be cleared.
 fn my_trailing_ones(u: &u64) -> usize {
     let mut k = 0;
     while k < 64 {
@@ -103,8 +103,9 @@ fn my_trailing_ones(u: &u64) -> usize {
     k
 }
 
-#[ensures(result <= 64)]
-#[ensures(forall(|k: usize| k < result ==> !is_allocated_u64(u, k)))]
+#[ensures(result <= 64)]  // The result should be within the range of the u64.
+#[ensures(forall(|k: usize| k < result ==> !is_allocated_u64(u, k)))]  // All bits before the result should be cleared.
+#[ensures(result < 64 ==> is_allocated_u64(u, result))]  // The bit at the result position should be cleared.
 fn my_trailing_zeros(u: &u64) -> usize {
     let mut k = 0;
     while k < 64 {
@@ -182,6 +183,7 @@ fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
 
 #[pure]
 #[requires(bitfield.len() > 0)]
+#[ensures(result.is_some() ==> peek_option(&result) ==> is_allocated_u64(&bitfield[idx / 64], idx % 64))]
 fn is_allocated(bitfield: &[u64], idx: usize) -> Option<bool> {
     if idx < bitfield.len() * 64 {
         Some(is_allocated_u64(&bitfield[idx / 64], idx % 64))
@@ -191,9 +193,13 @@ fn is_allocated(bitfield: &[u64], idx: usize) -> Option<bool> {
 #[requires(bitfield.len() > 0)]
 #[requires(relevant_bits <= bitfield.len() * 64)]
 #[requires(relevant_bits > 0)]
-#[ensures(!result ==> exists(|i: usize| (bitfield[i] < U64_MAX)))]
-#[ensures(result ==> forall(|i: usize| ((i + 1) * 64 <= relevant_bits ==> bitfield[i] == U64_MAX)))]
-#[ensures(result ==> forall(|j: usize| (j * 64 < relevant_bits && (j + 1) * 64 > relevant_bits ==>
+#[ensures(!result ==> exists(|i: usize| (  // If the bitfield is not full, there must be at least one bit within the relevant_bits range that is not set.
+    ((i + 1) * 64 <= relevant_bits && bitfield[i] < U64_MAX) ||
+    (i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits &&
+        exists(|j: usize| j < relevant_bits - i * 64 ==> !is_allocated_u64(&bitfield[i], j)))
+)))]
+#[ensures(result ==> forall(|i: usize| ((i + 1) * 64 <= relevant_bits ==> bitfield[i] == U64_MAX)))]  // If the bitfield is full, all u64's before the one containing the last relevant bit must be set to U64_MAX.
+#[ensures(result ==> forall(|j: usize| (j * 64 < relevant_bits && (j + 1) * 64 > relevant_bits ==>  // If the bitfield is full, the u64 containing the last relevant bit must be set correctly (all bits before the last relevant bit are set to 1).
     forall(|k: usize| (k < relevant_bits - j * 64 ==> is_allocated_u64(&bitfield[j], k)))
 )))]
 fn is_full(bitfield: &[u64], relevant_bits: usize) -> bool {
@@ -238,8 +244,13 @@ fn is_full(bitfield: &[u64], relevant_bits: usize) -> bool {
 #[requires(bitfield.len() > 0)]
 #[requires(relevant_bits <= bitfield.len() * 64)]
 #[requires(relevant_bits > 0)]
-#[ensures(result ==> forall(|i: usize| ((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0)))]
-#[ensures(result ==> forall(|j: usize| (j * 64 < relevant_bits && (j + 1) * 64 > relevant_bits ==>
+#[ensures(!result ==> exists(|i: usize| (  // If the bitfield is not empty, there must be at least one bit within the relevant_bits range that is set.
+    ((i + 1) * 64 <= relevant_bits && bitfield[i] > 0) ||
+    (i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits &&
+        exists(|j: usize| j < relevant_bits - i * 64 ==> is_allocated_u64(&bitfield[i], j)))
+)))]
+#[ensures(result ==> forall(|i: usize| ((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0)))]  // If the bitfield is empty, all u64's before the one containing the last relevant bit must be set to 0.
+#[ensures(result ==> forall(|j: usize| (j * 64 < relevant_bits && (j + 1) * 64 > relevant_bits ==>  // If the bitfield is empty, the u64 containing the last relevant bit must be set correctly (all bits before the last relevant bit are set to 0).
     forall(|k: usize| (k < relevant_bits - j * 64 ==> !is_allocated_u64(&bitfield[j], k)))
 )))]
 fn all_free(bitfield: &[u64], relevant_bits: usize) -> bool {
@@ -262,7 +273,12 @@ fn all_free(bitfield: &[u64], relevant_bits: usize) -> bool {
             if remaining_bits >= 64 {if bitfield[i] != 0 {return false;}}
             else {
                 let tz = my_trailing_zeros(&bitfield[i]);
-                if tz < remaining_bits {return false;}
+                if tz < remaining_bits {
+                    prusti_assert!(tz < 64);
+                    prusti_assert!(is_allocated_u64(&bitfield[i], tz));
+                    prusti_assert!(exists(|j: usize| j < remaining_bits && is_allocated_u64(&bitfield[i], j)));
+                    return false;
+                }
                 else {
                     prusti_assert!(forall(|j: usize| j < tz ==> !is_allocated_u64(&bitfield[i], j)));
                     prusti_assert!(remaining_bits <= tz);

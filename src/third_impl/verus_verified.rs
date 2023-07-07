@@ -6,7 +6,7 @@ use vstd::prelude::*;
 verus! {
 
     fn main() {
-        
+
         // Basic assertions on bitshifting by one position.
         assert(forall|i: u64| i >> 1u64 == i / 2) by (bit_vector);
         assert(forall|i: u64| i << 1u64 == mul(i, 2)) by (bit_vector);
@@ -19,8 +19,12 @@ verus! {
         // equivalence between the bitshift expression and the power of 2 function.
         // (Do we need to formally prove the uniqueness of this function?)
         assert(1u64 << 0u64 == 1u64) by (bit_vector);  // Base case
-        assert(forall|i: u64| i > 0 && i < 64 ==>
-            1u64 << i == mul(2, (1u64 << (sub(i, 1u64))))) by (bit_vector);  // Induction hypothesis
+        assert(forall|i: u64| i > 0 && i < 64 ==>      // Induction hypothesis
+            1u64 << i == mul(2, 1u64 << sub(i, 1u64))) by (bit_vector);
+
+        // Some other properties of the power of 2 function
+        assert(forall|i: u64| i < 64 ==> (1u64 << i) > 0) by (bit_vector);
+        assert(forall|i: u64| i < 64 ==> (1u64 << i) < u64::MAX) by (bit_vector);
 
         // From now, we consider the expression (1u64 << k) to be equivalent to 2u64.pow(k)
         // given the above proof.
