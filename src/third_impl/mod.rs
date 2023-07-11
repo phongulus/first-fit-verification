@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use prusti_contracts::*;
 use crate::my_layout::Layout;
 
@@ -6,6 +8,108 @@ use crate::external_spec::{trusted_option::*};
 
 const U64_MAX: u64 = 18_446_744_073_709_551_615u64;
 
+// #[derive(Clone, Copy)]
+// pub struct AtomicU64(u64);
+
+// #[trusted]
+// #[pure]
+// #[requires(index < s.len())]
+// #[ensures(result == s[index])]
+// // #[after_expiry(s.len() == old(s.len()))]
+// fn index<T: Copy>(s: &[T], index: usize) -> T {
+//     s[index].clone()
+// }
+
+// impl AtomicU64 {
+//     #[pure]
+//     #[trusted]
+//     fn load(&self, _order: Ordering) -> u64 {
+//         self.0
+//     }
+
+//     #[trusted]
+//     #[ensures(self.load(_order) == val)]
+//     #[ensures(self.0 == val)]
+//     // #[assert_on_expiry(true ,self.load(_order) == val)]
+//     fn store(&self, val: u64, _order: Ordering) {
+//         // unsafe(*self).0 = val;
+//     }
+// }
+
+// #[trusted]
+// #[requires(index < s.len())]
+// #[assert_on_expiry(true, s.len() == old(s.len())
+//     && forall (|i: usize| i < s.len() && i != index ==> s[i].load(_order) == old(s[i].load(_order)))
+//     // && s[index].load(_order) == index_AtomicU64(s, index, _order).load(_order)
+// )]
+// // #[after_expiry(s[index].load(_order) == index_AtomicU64(s, index, _order).load(_order))]
+// fn index_mut_AtomicU64(s: &mut [AtomicU64], index: usize, _order: Ordering) -> &mut AtomicU64 {
+//     &mut s[index]
+// }
+
+// #[pure]
+// #[trusted]
+// #[requires(index < s.len())]
+// // #[after_expiry(s.len() == old(s.len()))]
+// #[ensures(result.load(_order) == s[index].load(_order))]
+// fn index_AtomicU64(s: &[AtomicU64], index: usize, _order: Ordering) -> &AtomicU64 {
+//     &s[index]
+// }
+
+// impl AtomicU64WrapperTrait for AtomicU64Model {
+//     #[pure]
+//     fn load(&self, _order: Ordering) -> u64 {
+//         self.0
+//     }
+
+//     fn store(&mut self, val: u64, _order: Ordering) {
+//         self.0 = val;
+//     }
+// }
+
+// #[ensures(a.load(order) == val)]
+// fn store_test(a: &mut AtomicU64, val: u64, order: Ordering) {
+//     a.store(val, order);
+//     prusti_assert!(a.load(order) == val);
+// }
+
+// #[requires(a.len() > 0)]
+// #[requires(index < a.len())]
+// #[ensures(a[index].load(order) == val)]
+// #[assert_on_expiry(true, a[index].load(order) == val)]
+// #[ensures({
+//     let u = index(a, i);
+//     u.load(order) == val
+// })]
+// fn store_test2(a: &mut [AtomicU64], index: usize, val: u64, order: Ordering) {
+//     let au64 = index_mut_AtomicU64(a, index, order);
+//     au64.store(val, order);
+//     prusti_assert!(a.len() == old(a.len()));
+//     prusti_assert!(forall (|i: usize| i < a.len() && i != index ==> a[i].load(order) == old(a[i].load(order))));
+//     // && s[index].load(_order) == index_AtomicU64(s, index, _order).load(_order)
+//     // prusti_assert!(index_AtomicU64(a, i, order).load(order) == a[i].load(order));
+//     // let u = index_mut(a, i);
+//     // u.store(val, order);
+//     // prusti_assert!(u.load(order) == val);
+//     // prusti_assert!(index(a, i).load(order) == u.load(order));
+//     // prusti_assert!(u.load(order) == a[i].load(order));
+//     // prusti_assert!(a[i].load(order) == val);
+//     // a[i].store(val, order);
+// }
+
+
+// #[requires(a.len() > 0)]
+// #[requires(i < a.len())]
+// #[ensures({
+//     let u = &a[i];
+//     u.load(order) == val
+// })]
+// fn store_test_2(a: &mut [impl AtomicU64WrapperTrait], i: usize, val: u64, order: Ordering) {
+//     a[i].store(val, order)
+//     // let u = &mut a[i];
+//     // u.store(val, order);
+//     // prusti_assert!(u.load(order) == val);
+// }
 
 // Basic bitfield operations with properties verified externally with Verus.
 
