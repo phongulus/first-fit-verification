@@ -1,11 +1,11 @@
 // #![no_std]
 mod external_spec;
 
-// mod first_impl;
-// use first_impl::*;
+mod first_impl;
+use first_impl::*;
 
-// mod second_impl;
-// use second_impl::*;
+mod second_impl;
+use second_impl::*;
 
 mod third_impl;
 use third_impl::*;
@@ -25,15 +25,15 @@ fn main() {
     let layout_maybe = Layout::from_size_align(2, 4);
     if let Some(layout) = layout_maybe {
         let u = 7u64;
-        // if first_impl::is_bitfield_u64_valid(u) && u < U64_MAX {
-        //     let _ = first_impl::first_fit_in_u64(u, base_idx, base_addr, layout, page_size, metadata_size);
-        // };
+        if first_impl::is_bitfield_u64_valid(u) && u < U64_MAX {
+            let _ = first_impl::first_fit_in_u64(u, base_idx, base_addr, layout, page_size, metadata_size);
+        };
 
-        // let test_bitfield_opt = second_impl::TrustedBitfield8::new(8, 64, base_addr, layout, page_size, metadata_size);
-        // match test_bitfield_opt {
-        //     Some(test_bitfield) => test_bitfield.first_fit(),
-        //     None => None,
-        // };
+        let test_bitfield_opt = second_impl::TrustedBitfield8::new(8, 64, base_addr, layout, page_size, metadata_size);
+        match test_bitfield_opt {
+            Some(test_bitfield) => test_bitfield.first_fit(),
+            None => None,
+        };
 
         let test_bitfield_opt = third_impl::TrustedBitfield8::new(8, 64, base_addr, layout, page_size, metadata_size);
         match test_bitfield_opt {

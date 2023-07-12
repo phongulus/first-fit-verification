@@ -43,22 +43,18 @@ no way to do this in Prusti, hence we need to fall back on pen and paper.
 
 ## Third implementation
 
-The third implementation makes use of another verification tool, Verus, in addition to Prusti. We use Verus to verify some 
-bit vector properties 
+The third implementation makes use of another verification tool, Verus, in addition to Prusti. We use Verus to verify some bit
+bitfield properties using its `bit_vector` verifier. We verify properties for the following functions: `power_of_2`, `set_bit`, 
+`clear_bit`, `make_trailing_zeroes`, `make_trailing_ones`, and `is_allocated`. These verified properties are then put into Prusti 
+as trusted postconditions (assertions that Prusti will accept without verifying). We then proceed to prove the remaining functions
+for bitfield operations the same way as we did for the second implementation. The advantages of this approach are:
 
-## Properties and invariants
+- More optimized than the second implementation, since we are not reliant on expensive arithmetic logarithm and power functions.
+- More airtight, no manual pen-and-paper proof needed.
 
-## Second implementation properties
+## Next steps
 
-The second implementation accomodates cases where we do not necessarily have contiguous `1`s and `0`s in the bit field. This is more realistic as the operating system will be constantly deallocating memory as well, and not necessarily in the order of allocation. Again, we split the original `first_fit()` function into a `first_fit_in_u64()` function that upholds the following properties:
-
-- It only accepts bit fields that are non-full, i.e., with a value less than `u64::MAX`.
-- Since the bit field is non-full, we _must_ be able to allocate a new memory block inside (memory alignment and overlap with metadata notwithstanding). As long as the previous condition is guaranteed, `first_fit_in_u64()` should not need the `Option<T>` wrapper.
-
-To find such index, we use the bitwise `u64::trailing_ones()` function. We make a wrapper around this function that verifies the following properties:
-
-- The input bit field is less than `u64::MAX`.
-- The output `idx` should be the first index where the bit is 0. This is verified by calculating 
-- `first_fit` should return the first free address / bit index. This is verified with the following invariants:
-    - fewfe
-
+- Create a model for `AtomicU64` that can be verified by Prusti and that can be subtituted for the actual `AtomicU64` used in    
+Theseus. I currently have some difficulty doing this because Prusti doesn't seem to play very nicely with references to generic
+types.
+- Integrate this with the existing bitfield infrastructure in Theseus.

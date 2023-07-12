@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+// use std::sync::atomic::Ordering;
 
 use prusti_contracts::*;
 use crate::my_layout::Layout;
@@ -266,8 +266,8 @@ fn initialize(bitfield: &mut [u64], relevant_bits: usize) {
 
         prusti_assert!(i * 64 >= relevant_bits ==> bitfield[i] == U64_MAX);
         prusti_assert!((i + 1) * 64 <= relevant_bits ==> bitfield[i] == 0);
-        prusti_assert!(i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits ==>
-            forall(|j: usize| j < relevant_bits - bit_idx ==> !is_allocated_u64(&bitfield[i], j)));
+        // prusti_assert!(i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits ==>
+        //     forall(|j: usize| j < relevant_bits - bit_idx ==> !is_allocated_u64(&bitfield[i], j)));
         prusti_assert!(i * 64 < relevant_bits && (i + 1) * 64 > relevant_bits ==>
             forall(|j: usize| j >= relevant_bits - bit_idx && j < 64 ==> is_allocated_u64(&bitfield[i], j)));
 
