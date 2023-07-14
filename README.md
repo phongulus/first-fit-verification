@@ -58,3 +58,18 @@ for bitfield operations the same way as we did for the second implementation. Th
 Theseus. I currently have some difficulty doing this because Prusti doesn't seem to play very nicely with references to generic
 types.
 - Integrate this with the existing bitfield infrastructure in Theseus.
+
+## Prusti configuration
+
+Last verified successfully 14 July 2023 on Ubuntu 22.04.2 LTS, x86_64. Prusti VSCode extension using `LatestRelease` build option. Environment
+options:
+
+```
+"prusti-assistant.extraPrustiEnv": {
+    "PRUSTI_CHECK_OVERFLOWS": "false",
+    "PRUSTI_ENCODE_BITVECTORS": "true",
+    "PRUSTI_ASSERT_TIMEOUT": "40",
+    "PRUSTI_MIN_PRUSTI_VERSION": "0.2.1",
+    "PRUSTI_ENABLE_TYPE_INVARIANTS": "true"
+},
+```
