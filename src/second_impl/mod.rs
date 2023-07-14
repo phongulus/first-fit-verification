@@ -1,5 +1,4 @@
 use prusti_contracts::*;
-use crate::my_layout::Layout;
 use crate::external_spec::{trusted_option::*, trusted_num::*};
 use core::cell::RefCell;
 
@@ -326,8 +325,8 @@ fn first_fit_idx(u: u64) -> u32 {
     u.trailing_ones()
 }
 
-#[requires(layout.size() > 0)]
-#[requires(layout.align() > 0)]
+#[requires(layout_size > 0)]
+#[requires(layout_align > 0)]
 #[requires(u < U64_MAX)]
 #[ensures(result.is_some() ==> {  // The returned index should within the bounds of the current u64.
     let (idx, addr) = peek_option(&result);
@@ -335,38 +334,39 @@ fn first_fit_idx(u: u64) -> u32 {
 })]
 #[ensures(result.is_some() ==> {  // The index is mapped to the correct address.
     let (idx, addr) = peek_option(&result);
-    addr == base_addr + idx * layout.size()
+    addr == base_addr + idx * layout_size
 })]
 #[ensures(result.is_some() ==> {  // Check that the returned address does not overlap with metadata. 
     let (idx, addr) = peek_option(&result);
-    addr - base_addr <= page_size - metadata_size - layout.size() && addr % layout.align() == 0
+    addr - base_addr <= page_size - metadata_size - layout_size && addr % layout_align == 0
 })]
 pub fn first_fit_in_u64 (
     u: u64,
     base_idx: usize,
     base_addr: usize,
-    layout: Layout,
+    layout_size: usize,
+    layout_align: usize,
     page_size: usize,
     metadata_size: usize
 ) -> Option<(usize, usize)> {
     let first_free = first_fit_idx(u) as usize;
     let idx = base_idx * 64 + first_free;
-    let offset = idx * layout.size();
+    let offset = idx * layout_size;
     let addr = base_addr + offset;
-    if offset <= (page_size - metadata_size - layout.size()) && addr % layout.align() == 0 {
+    if offset <= (page_size - metadata_size - layout_size) && addr % layout_align == 0 {
         Some((idx, addr))
     } else {None}
 }
 
-#[requires(layout.size() > 0)]
-#[requires(layout.align() > 0)]
+#[requires(layout_size > 0)]
+#[requires(layout_align > 0)]
 #[ensures(result.is_some() ==> {  // Check that the returned index is within range and that the address is correct.
     let (idx, addr) = peek_option(&result);
-    idx < bitfield.len() * 64 && addr == base_addr + idx * layout.size()
+    idx < bitfield.len() * 64 && addr == base_addr + idx * layout_size
 })]
 #[ensures(result.is_some() ==> {  // Check that the returned address does not overlap with metadata.
     let (idx, addr) = peek_option(&result);
-    addr - base_addr <= page_size - metadata_size - layout.size() && addr % layout.align() == 0
+    addr - base_addr <= page_size - metadata_size - layout_size && addr % layout_align == 0
 })]
 #[ensures(result.is_some() ==> {  // Ensure that all u64 before the returned index is full. The result being the first free bit of its u64 is already guaranteed by `first_fit_in_u64`.
     let (idx, addr) = peek_option(&result);
@@ -377,7 +377,8 @@ pub fn first_fit_in_u64 (
 fn first_fit(
     bitfield: &[u64],
     base_addr: usize,
-    layout: Layout,
+    layout_size: usize,
+    layout_align: usize,
     page_size: usize,
     metadata_size: usize
 ) -> Option<(usize, usize)> {
@@ -388,7 +389,7 @@ fn first_fit(
         body_invariant!(forall(|i: usize| i < base_idx ==> bitfield[i] == U64_MAX));  // All previous u64 must have max value
 
         if bitfield[base_idx] < U64_MAX {
-            return first_fit_in_u64(bitfield[base_idx], base_idx, base_addr, layout, page_size, metadata_size)
+            return first_fit_in_u64(bitfield[base_idx], base_idx, base_addr, layout_size, layout_align, page_size, metadata_size)
         }
 
         prusti_assert!(bitfield[base_idx] == U64_MAX);
@@ -408,12 +409,17 @@ fn first_fit(
 
 #[invariant(self.relevant_bits <= self.bitfield.len() * 64)]  // The number of used bits cannot exceed the maximum number of available bits.
 #[invariant(self.relevant_bits > 0)]  // The number of used bits should be more than 0.
+#[invariant(self.layout_align > 0)]
+#[invariant(self.layout_size > 0)]
+#[invariant(self.layout_align.is_power_of_two())]
+#[invariant(self.layout_size % self.layout_align == 0)]
 // #[invariant(self.initialized ==> forall(|i: usize| i < self.bitfield.len() && i * 64 >= self.relevant_bits ==> self.bitfield[i] == U64_MAX))]
 pub struct TrustedBitfield8 {  // Change name for other bitfield types
     bitfield: [u64; TrustedBitfield8::SIZE],  // Change name for other bitfield sizes
     relevant_bits: usize,
     base_addr: usize,
-    layout: Layout,
+    layout_size: usize,
+    layout_align: usize,
     page_size: usize,
     metadata_size: usize,
     initialized: bool
@@ -425,33 +431,29 @@ impl TrustedBitfield8 {
         for_size: usize,
         capacity: usize,
         base_addr: usize,
-        layout: Layout,
+        layout_size: usize,
+        layout_align: usize,
         page_size: usize,
         metadata_size: usize
     ) -> Option<Self> {
-        if for_size > 0 && capacity > 0 && for_size < capacity {
+        let valid_args =
+            for_size > 0 && capacity > 0 && for_size < capacity &&
+            layout_align > 0 && layout_size > 0 &&
+            layout_align.is_power_of_two() && layout_size % layout_align == 0;
+        if valid_args {
             let bitfield = [0, 0, 0, 0, 0, 0, 0, 0];  // Change this for other bitfield sizes
             let available_bits = bitfield.len() * 64;
             let wanted_bits = capacity / for_size;
             let relevant_bits = if wanted_bits <= available_bits {wanted_bits} else {available_bits};
             let mut trusted_bitfield = TrustedBitfield8 {  // Change this for other bitfield types
-                bitfield, relevant_bits, base_addr, layout, page_size, metadata_size, initialized: false
+                bitfield, relevant_bits, base_addr, layout_size, layout_align, page_size, metadata_size, initialized: false
             };
             trusted_bitfield.initialize();
             Some(trusted_bitfield)
         } else {None}
     }
-    pub fn initialize(&mut self) {
-        let bitfield_ref = &mut self.bitfield;
-        let () = initialize(bitfield_ref, self.relevant_bits);
-        prusti_assert!(self.bitfield.len() == old(self.bitfield.len()));
-        // The below does not pass?
-        // prusti_assert!(forall(|i: usize| ((i + 1) * 64 <= self.relevant_bits ==> self.bitfield[i] == 0)));
-        // prusti_assert!(forall(|i: usize| (i * 64 < self.relevant_bits && (i + 1) * 64 > self.relevant_bits ==> self.bitfield[i].trailing_zeros() as usize == self.relevant_bits % 64)));
-        // prusti_assert!(forall(|i: usize| (i < self.bitfield.len() && i * 64 >= self.relevant_bits ==> self.bitfield[i] == U64_MAX)));
-        self.initialized = true;
-    }
-    pub fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout, self.page_size, self.metadata_size)}
+    pub fn initialize(&mut self) {initialize(&mut self.bitfield, self.relevant_bits)}
+    pub fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout_size, self.layout_align, self.page_size, self.metadata_size)}
     pub fn is_allocated(&self, idx: usize) -> Option<bool> {is_allocated(&self.bitfield, idx)}
     pub fn set_bit(&mut self, idx: usize) -> Option<bool> {set_bit(&mut self.bitfield, idx)}
     pub fn clear_bit(&mut self, idx: usize) -> Option<bool> {clear_bit(&mut self.bitfield, idx)}

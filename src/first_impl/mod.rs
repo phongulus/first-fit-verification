@@ -1,5 +1,5 @@
 use prusti_contracts::*;
-use crate::my_layout::Layout;
+use crate::my_layout::*;
 use crate::external_spec::{trusted_option::*, trusted_num::*};
 
 const U64_MAX: u64 = 18_446_744_073_709_551_615u64;
@@ -118,8 +118,8 @@ fn first_fit_idx(u: u64) -> u64 {
     }
 }
 
-// #[requires(layout.size() > 0)]
-// #[requires(layout.align() > 0)]
+// #[requires(layout_size(&layout) > 0)]
+// #[requires(layout_align(&layout) > 0)]
 // fn check_first_fit_overlap_and_alignment(
 //     offset: usize,
 //     addr: usize,
@@ -127,11 +127,11 @@ fn first_fit_idx(u: u64) -> u64 {
 //     page_size: usize,
 //     metadata_size: usize
 // ) -> bool {
-//     offset > (page_size - metadata_size - layout.size()) && addr % layout.align() == 0
+//     offset > (page_size - metadata_size - layout_size(&layout)) && addr % layout_align(&layout) == 0
 // }
 
-#[requires(layout.size() > 0)]
-#[requires(layout.align() > 0)]
+#[requires(layout_size(&layout) > 0)]
+#[requires(layout_align(&layout) > 0)]
 #[requires(u < U64_MAX)]
 #[requires(is_bitfield_u64_valid(u))]
 pub fn first_fit_in_u64 (
@@ -145,9 +145,9 @@ pub fn first_fit_in_u64 (
 ) -> Option<(usize, usize)> {
     let first_free = first_fit_idx(u) as usize;
     let idx = base_idx * 64 + first_free;
-    let offset = idx * layout.size();
+    let offset = idx * layout_size(&layout);
     let addr = base_addr + offset;
-    if offset > (page_size - metadata_size - layout.size()) && addr % layout.align() == 0 {
+    if offset > (page_size - metadata_size - layout_size(&layout)) && addr % layout_align(&layout) == 0 {
         Some((idx, addr))
     } else {None}
 
@@ -316,13 +316,13 @@ pub fn first_fit_in_u64 (
 //     is_bitfield_u64_valid_aux(1, n)
 // }
 
-// #[requires(layout.align() > 0)]
-// #[requires(layout.size() > 0)]
+// #[requires(layout_align(&layout) > 0)]
+// #[requires(layout_size(&layout) > 0)]
 // #[requires(*u < 18_446_744_073_709_551_615u64)]
 // // #[requires(is_bitfield_u64_valid(*u))]
 // // #[requires]
 // #[requires(metadata_size < page_size)]
-// #[requires(base_idx <= page_size / layout.size() - base_addr)]
+// #[requires(base_idx <= page_size / layout_size(&layout) - base_addr)]
 // fn first_fit(
 //     u: &mut u64,
 //     base_idx: usize,
@@ -333,15 +333,15 @@ pub fn first_fit_in_u64 (
 // ) -> Option<(usize, usize)> {
 //     let first_free = trailing_ones(u);
 //     let idx: usize = base_idx * 64 + first_free;
-//     let offset = idx * layout.size();
+//     let offset = idx * layout_size(&layout);
 
-//     let offset_inside_data_area = offset <= (page_size - metadata_size - layout.size());
+//     let offset_inside_data_area = offset <= (page_size - metadata_size - layout_size(&layout));
 //     if !offset_inside_data_area {
 //         return None;
 //     }
 
 //     let addr: usize = base_addr + offset;
-//     let alignment_ok = addr % layout.align() == 0;
+//     let alignment_ok = addr % layout_align(&layout) == 0;
 //     if alignment_ok {
 //         return Some((idx, addr));
 //     }
@@ -411,16 +411,16 @@ pub fn first_fit_in_u64 (
 //             let negated = !bitval;
 //             let first_free = negated.trailing_zeros() as usize;
 //             let idx: usize = base_idx * 64 + first_free;
-//             let offset = idx * layout.size();
+//             let offset = idx * layout_size(&layout);
 
 //             // TODO(bad): psize needs to be passed as arg
-//             let offset_inside_data_area = offset <= (page_size - metadata_size - layout.size());
+//             let offset_inside_data_area = offset <= (page_size - metadata_size - layout_size(&layout));
 //             if !offset_inside_data_area {
 //                 return None;
 //             }
 
 //             let addr: usize = base_addr + offset;
-//             let alignment_ok = addr % layout.align() == 0;
+//             let alignment_ok = addr % layout_align(&layout) == 0;
 //             let block_is_free = bitval & (1 << first_free) == 0;
 //             if alignment_ok && block_is_free {
 //                 // insert range here

@@ -61,4 +61,11 @@ impl usize {
     #[ensures(result.is_some() ==> peek_option(&result) == self - rhs)]
     #[ensures(result.is_some() ==> peek_option(&result) <= self)]
     pub fn checked_sub(self, rhs: usize) -> Option<usize>;
+
+    #[pure]
+    #[ensures(self == 0 ==> !result)]
+    #[ensures(self == 1 ==> result)]
+    #[ensures(self == 2 ==> result)]
+    #[ensures(self > 1 && self % 2 != 0 ==> !result)]
+    pub fn is_power_of_two(self) -> bool;
 }
