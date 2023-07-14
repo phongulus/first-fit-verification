@@ -73,3 +73,5 @@ options:
     "PRUSTI_ENABLE_TYPE_INVARIANTS": "true"
 },
 ```
+
+Verified successfully on a M1 Mac with the same environment options after uncommenting line 277 of `third_impl/mod.rs` (verification _might_ also pass on Linux x86 with this line uncommented). Prusti set up on M1 following the workaround described [here](https://github.com/viperproject/prusti-dev/issues/1193#issuecomment-1312956882). The version of Prusti used is the stable release from 26 January 2023.
