@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use prusti_contracts::*;
 
 #[allow(unused_imports)]
-use crate::external_spec::{trusted_option::*};
+use crate::external_spec::trusted_option::*;
 
 const U64_MAX: u64 = 18_446_744_073_709_551_615u64;
 
@@ -32,21 +32,22 @@ impl AtomicU64 {
         let raw = self as *const AtomicU64 as *mut AtomicU64;
         unsafe{(*raw).0 = val};
     }
+
+    #[trusted]
+    fn fetch_and(&self, val: u64, _order: Ordering) {
+        let raw = self as *const AtomicU64 as *mut AtomicU64;
+        unsafe{(*raw).0 &= val}
+    }
+
+    #[trusted]
+    fn fetch_or(&self, val: u64, _order: Ordering) {
+        let raw = self as *const AtomicU64 as *mut AtomicU64;
+        unsafe{(*raw).0 |= val}
+    }
 }
 
-#[ensures(a.load(order) == val)]
-fn store_test(a: &AtomicU64, val: u64, order: Ordering) {
-    a.store(val, order);
-    prusti_assert!(a.load(order) == val);
-}
-
-#[requires(a.len() > 0)]
-#[requires(a.len() > index)]
-#[ensures(a[index].load(order) == val)]
-fn store_test2(a: &[AtomicU64], index: usize, val: u64, order: Ordering) {
-    a[index].store(val, order);
-    prusti_assert!(a[index].load(order) == val);
-}
+pub struct VerifiedAllocAddr(usize);
+pub struct VerifiedDeallocAddr(usize);
 
 // Basic bitfield operations with properties verified externally with Verus.
 
@@ -69,32 +70,60 @@ fn is_allocated_u64(u: &u64, idx: usize) -> bool {
     *u & (1 << idx) > 0
 }
 
+// #[trusted]
+// #[requires(idx < 64)]
+// #[ensures({  // If the bit is previously set, there should be no change to u.
+//     is_allocated_u64(old(u), idx) <==> old(*u) == *u
+// })]
+// #[ensures({  // If the bit is not set, u should be changed to u + 2^idx.
+//     let p = power_of_two_u64(idx);
+//     !is_allocated_u64(old(u), idx) ==> old(*u) + p == *u
+// })]
+// #[ensures(is_allocated_u64(u, idx))]  // Regardless of whether u is updated or not, the bit should be 1 when the function returns.
+// fn set_bit_u64(u: &mut u64, idx: usize) {
+//     *u = *u | (1 << idx);
+// }
+
+// #[trusted]
+// #[requires(idx < 64)]
+// #[ensures({  // If the bit is previously cleared, there should be no change to u.
+//     !is_allocated_u64(old(u), idx) ==> old(*u) == *u
+// })]
+// #[ensures({  // If the bit is set, u should be changed to u - 2^idx.
+//     let p = power_of_two_u64(idx);
+//     is_allocated_u64(old(u), idx) ==> old(*u) - p == *u
+// })]
+// #[ensures(!is_allocated_u64(u, idx))]  // Regardless of whether u is updated or not, the bit should be 0 when the function returns.
+// fn clear_bit_u64(u: &mut u64, idx: usize) {
+//     *u = *u & !(1 << idx);
+// }
+
 #[trusted]
 #[requires(idx < 64)]
 #[ensures({  // If the bit is previously set, there should be no change to u.
-    is_allocated_u64(old(u), idx) <==> old(*u) == *u
+    is_allocated_u64(old(&u.0), idx) <==> old(u.0) == u.0
 })]
 #[ensures({  // If the bit is not set, u should be changed to u + 2^idx.
     let p = power_of_two_u64(idx);
-    !is_allocated_u64(old(u), idx) ==> old(*u) + p == *u
+    !is_allocated_u64(old(&u.0), idx) ==> old(u.0) + p == u.0
 })]
-#[ensures(is_allocated_u64(u, idx))]  // Regardless of whether u is updated or not, the bit should be 1 when the function returns.
-fn set_bit_u64(u: &mut u64, idx: usize) {
-    *u = *u | (1 << idx);
+#[ensures(is_allocated_u64(&u.0, idx))]  // Regardless of whether u is updated or not, the bit should be 1 when the function returns.
+fn set_bit_atomic_u64(u: &AtomicU64, idx: usize) {
+    u.fetch_or(1 << idx, Ordering::Relaxed)
 }
 
 #[trusted]
 #[requires(idx < 64)]
 #[ensures({  // If the bit is previously cleared, there should be no change to u.
-    !is_allocated_u64(old(u), idx) ==> old(*u) == *u
+    !is_allocated_u64(old(&u.0), idx) ==> old(u.0) == u.0
 })]
 #[ensures({  // If the bit is set, u should be changed to u - 2^idx.
     let p = power_of_two_u64(idx);
-    is_allocated_u64(old(u), idx) ==> old(*u) - p == *u
+    is_allocated_u64(old(&u.0), idx) ==> old(u.0) - p == u.0
 })]
-#[ensures(!is_allocated_u64(u, idx))]  // Regardless of whether u is updated or not, the bit should be 0 when the function returns.
-fn clear_bit_u64(u: &mut u64, idx: usize) {
-    *u = *u & !(1 << idx);
+#[ensures(!is_allocated_u64(&u.0, idx))]  // Regardless of whether u is updated or not, the bit should be 0 when the function returns.
+fn clear_bit_atomic_u64(u: &AtomicU64, idx: usize) {
+    u.fetch_and(1 << idx, Ordering::Relaxed)
 }
 
 #[pure]
@@ -369,9 +398,10 @@ fn clear_bit(bitfield: &[AtomicU64], idx: usize) -> bool {
     if idx >= bitfield.len() * 64 {return false}
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
-    let mut b_u64 = bitfield[base_idx].load(Ordering::Relaxed);
-    clear_bit_u64(&mut b_u64, bit_idx);
-    bitfield[base_idx].store(b_u64, Ordering::Relaxed);
+    clear_bit_atomic_u64(&bitfield[base_idx], bit_idx);
+    // let mut b_u64 = bitfield[base_idx].load(Ordering::Relaxed);
+    // clear_bit_u64(&mut b_u64, bit_idx);
+    // bitfield[base_idx].store(b_u64, Ordering::Relaxed);
     true
 
     // The above should be equivalent to this line below, but this cannot be
@@ -399,9 +429,10 @@ fn set_bit(bitfield: &[AtomicU64], idx: usize) -> bool {
     if idx >= bitfield.len() * 64 {return false}
     let base_idx = idx / 64;
     let bit_idx = idx % 64;
-    let mut b_u64 = bitfield[base_idx].load(Ordering::Relaxed);
-    set_bit_u64(&mut b_u64, bit_idx);
-    bitfield[base_idx].store(b_u64, Ordering::Relaxed);
+    set_bit_atomic_u64(&bitfield[base_idx], bit_idx);
+    // let mut b_u64 = bitfield[base_idx].load(Ordering::Relaxed);
+    // set_bit_u64(&mut b_u64, bit_idx);
+    // bitfield[base_idx].store(b_u64, Ordering::Relaxed);
     true
 
     // The above should be equivalent to this line below, but this cannot be
@@ -435,6 +466,14 @@ fn first_fit_idx(u: u64) -> usize {
 #[ensures(result.is_some() ==> {  // Check that the returned address does not overlap with metadata. 
     let (idx, addr) = peek_option(&result);
     addr - base_addr <= page_size - metadata_size - layout_size && addr % layout_align == 0
+})]
+#[ensures(result.is_some() ==> {  // Check that the result index is available
+    let (idx, addr) = peek_option(&result);
+    !is_allocated_u64(&u, idx - base_idx * 64)
+})]
+#[ensures(result.is_some() ==> {  // Check that the result index is the first one available (all previous indices allocated)
+    let (idx, addr) = peek_option(&result);
+    forall(|j: usize| j < idx - base_idx * 64 ==> is_allocated_u64(&u, j))
 })]
 fn first_fit_in_u64 (
     u: u64,
@@ -470,7 +509,15 @@ fn first_fit_in_u64 (
     let base_idx = idx / 64;
     forall(|i: usize| i < base_idx ==> bitfield[i].0 == U64_MAX)
 })]
-#[ensures(forall(|i: usize| i < bitfield.len() ==> bitfield[i].0 == U64_MAX) ==> !result.is_some())]
+#[ensures(forall(|i: usize| i < bitfield.len() ==> bitfield[i].0 == U64_MAX) ==> !result.is_some())]  // No result if the bitfield is full.
+#[ensures(result.is_some() ==> {  // Check that the result index is available
+    let (idx, addr) = peek_option(&result);
+    !is_allocated_u64(&bitfield[idx / 64].0, idx % 64)
+})]
+#[ensures(result.is_some() ==> {  // Check that the result index is the first one available in the u64 containing it (all previous indices allocated)
+    let (idx, addr) = peek_option(&result);
+    forall(|j: usize| j < idx % 64 ==> is_allocated_u64(&bitfield[idx / 64].0, j))
+})]
 fn first_fit(
     bitfield: &[AtomicU64],
     base_addr: usize,
@@ -524,6 +571,11 @@ pub struct TrustedBitfield8 {  // Change name for other bitfield types
 
 impl TrustedBitfield8 {
     const SIZE: usize = 8;  // Change this for other bitfield sizes
+    fn initialize(&mut self) {initialize(&mut self.bitfield, self.relevant_bits)}
+    fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout_size, self.layout_align, self.page_size, self.metadata_size)}
+    fn set_bit(&self, idx: usize) -> bool {set_bit(&self.bitfield, idx)}
+    fn clear_bit(&self, idx: usize) -> bool {clear_bit(&self.bitfield, idx)}
+
     pub fn new(
         for_size: usize,
         capacity: usize,
@@ -551,11 +603,18 @@ impl TrustedBitfield8 {
             Some(trusted_bitfield)
         } else {None}
     }
-    pub fn initialize(&mut self) {initialize(&mut self.bitfield, self.relevant_bits)}
-    pub fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout_size, self.layout_align, self.page_size, self.metadata_size)}
+    pub fn first_fit_and_set(&self) -> Option<VerifiedAllocAddr> {
+        if let Some((idx, addr)) = self.first_fit() {
+            self.set_bit(idx);
+            Some(VerifiedAllocAddr(addr))
+        } else {None}
+    }
+    pub fn clear_verified_addr(&self, addr: VerifiedDeallocAddr) -> bool {  // Should take ownership of the VerifiedAddr
+        if addr.0 >= self.base_addr {
+            self.clear_bit((addr.0 - self.base_addr) / self.layout_size)
+        } else {false}
+    }
     pub fn is_allocated(&self, idx: usize) -> Option<bool> {is_allocated(&self.bitfield, idx)}
-    pub fn set_bit(&mut self, idx: usize) -> bool {set_bit(&mut self.bitfield, idx)}
-    pub fn clear_bit(&mut self, idx: usize) -> bool {clear_bit(&mut self.bitfield, idx)}
     pub fn is_full(&self) -> bool {is_full(&self.bitfield, self.relevant_bits)}
     pub fn all_free(&self) -> bool {all_free(&self.bitfield, self.relevant_bits)}
 }
