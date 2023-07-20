@@ -47,7 +47,12 @@ impl AtomicU64 {
 }
 
 pub struct VerifiedAllocAddr(usize);
+
 pub struct VerifiedDeallocAddr(usize);
+
+fn new_verified_dealloc_addr(addr: usize) -> VerifiedDeallocAddr {
+    VerifiedDeallocAddr(addr)
+}
 
 // Basic bitfield operations with properties verified externally with Verus.
 
@@ -566,16 +571,27 @@ pub struct TrustedBitfield8 {  // Change name for other bitfield types
     layout_size: usize,
     layout_align: usize,
     page_size: usize,
-    metadata_size: usize
+    metadata_size: usize,
+    dealloc_callback_generated: bool
 }
 
 impl TrustedBitfield8 {
     const SIZE: usize = 8;  // Change this for other bitfield sizes
+
+    // Unexposed functions that should not be called by themselves
     fn initialize(&mut self) {initialize(&mut self.bitfield, self.relevant_bits)}
     fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout_size, self.layout_align, self.page_size, self.metadata_size)}
     fn set_bit(&self, idx: usize) -> bool {set_bit(&self.bitfield, idx)}
     fn clear_bit(&self, idx: usize) -> bool {clear_bit(&self.bitfield, idx)}
 
+    /// Generate a callback for creating a `VerifiedDeallocAddr`.
+    /// Must be trusted since Prusti cannot reason about function pointers.
+    #[trusted]
+    pub fn dealloc_callback(&mut self) -> Option<fn(addr: usize) -> VerifiedDeallocAddr> {
+        if self.dealloc_callback_generated {None} else {self.dealloc_callback_generated = true; Some(new_verified_dealloc_addr)}
+    }
+
+    // Public functions 
     pub fn new(
         for_size: usize,
         capacity: usize,
@@ -597,7 +613,8 @@ impl TrustedBitfield8 {
             let wanted_bits = capacity / for_size;
             let relevant_bits = if wanted_bits <= available_bits {wanted_bits} else {available_bits};
             let mut trusted_bitfield = TrustedBitfield8 {  // Change this for other bitfield types
-                bitfield, relevant_bits, base_addr, layout_size, layout_align, page_size, metadata_size
+                bitfield, relevant_bits, base_addr, layout_size, layout_align, page_size, metadata_size,
+                dealloc_callback_generated: false
             };
             trusted_bitfield.initialize();
             Some(trusted_bitfield)
@@ -609,7 +626,7 @@ impl TrustedBitfield8 {
             Some(VerifiedAllocAddr(addr))
         } else {None}
     }
-    pub fn clear_verified_addr(&self, addr: VerifiedDeallocAddr) -> bool {  // Should take ownership of the VerifiedAddr
+    pub fn clear_verified_addr(&self, addr: VerifiedDeallocAddr) -> bool {  // Should take ownership of the VerifiedDeallocAddr
         if addr.0 >= self.base_addr {
             self.clear_bit((addr.0 - self.base_addr) / self.layout_size)
         } else {false}

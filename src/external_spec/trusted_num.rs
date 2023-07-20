@@ -30,7 +30,7 @@ impl u64 {
     // Trivial stuff
     #[ensures(result <= 64)]
     #[ensures(self == 0 ==> result == 0)]
-    #[ensures(self == U64_MAX <==> result == 64)]
+    #[ensures((self == U64_MAX) <==> (result == 64))]
     #[ensures(self < U64_MAX <==> result < 64)]
     #[ensures(result < 64 ==> forall(|r: u32| (r == result ==> 2u64.checked_pow(r).is_some())))]
 
