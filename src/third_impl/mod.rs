@@ -54,6 +54,53 @@ fn new_verified_dealloc_addr(addr: usize) -> VerifiedDeallocAddr {
     VerifiedDeallocAddr(addr)
 }
 
+// use core::alloc::Layout; 
+
+#[invariant(self.align > 0)]
+#[invariant(self.size > 0)]
+#[invariant(self.align.is_power_of_two())]
+#[invariant(self.size % self.align == 0)]
+#[derive(Clone, Copy)]
+pub struct Layout {
+    align: usize,
+    size: usize
+}
+
+struct LayoutError;
+
+impl Layout {
+    /// Conditions:
+    /// - align > 0
+    /// - align is a power of 2
+    /// - size > 0
+    /// - size is a multiple of align
+    /// The postconditions underneath are now guaranteed by type invariants on the Layout struct.
+    // #[ensures(result.is_ok() ==> {
+    //     size > 0 && align > 0 && align.is_power_of_two() && size % align == 0
+    // })]
+    // #[ensures(result.is_ok() ==> {
+    //     peek_result(&result).size > 0 &&
+    //     peek_result(&result).align > 0 &&
+    //     peek_result(&result).align.is_power_of_two() &&
+    //     peek_result(&result).size % peek_result(&result).align == 0
+    // })]
+    // fn from_size_align(align: usize, size: usize) -> Result<Layout, LayoutError> {
+    //     if size > 0 && align > 0 && align.is_power_of_two() && size % align == 0 {
+    //         Ok(Layout { align, size })
+    //     } else {Err(LayoutError)}
+    // }
+
+    #[pure]
+    fn size(&self) -> usize {
+        self.size
+    }
+
+    #[pure]
+    fn align(&self) -> usize {
+        self.align
+    }
+}
+
 // Basic bitfield operations with properties verified externally with Verus.
 
 #[pure]
@@ -461,8 +508,8 @@ fn first_fit_idx(u: u64) -> usize {
     i
 }
 
-#[requires(layout_size > 0)]
-#[requires(layout_align > 0)]
+#[requires(layout.size() > 0)]
+#[requires(layout.align() > 0)]
 #[requires(u < U64_MAX)]
 #[ensures(result.is_some() ==> {  // The returned index should within the bounds of the current u64.
     let (idx, addr) = peek_option(&result);
@@ -470,11 +517,11 @@ fn first_fit_idx(u: u64) -> usize {
 })]
 #[ensures(result.is_some() ==> {  // The index is mapped to the correct address.
     let (idx, addr) = peek_option(&result);
-    addr == base_addr + idx * layout_size
+    addr == base_addr + idx * layout.size()
 })]
 #[ensures(result.is_some() ==> {  // Check that the returned address does not overlap with metadata. 
     let (idx, addr) = peek_option(&result);
-    addr - base_addr <= page_size - metadata_size - layout_size && addr % layout_align == 0
+    addr - base_addr <= page_size - metadata_size - layout.size() && addr % layout.align() == 0
 })]
 #[ensures(result.is_some() ==> {  // Check that the result index is available
     let (idx, addr) = peek_option(&result);
@@ -488,30 +535,29 @@ fn first_fit_in_u64 (
     u: u64,
     base_idx: usize,
     base_addr: usize,
-    layout_size: usize,
-    layout_align: usize,
+    layout: Layout,
     page_size: usize,
     metadata_size: usize
 ) -> Option<(usize, usize)> {
     let first_free = first_fit_idx(u);
     let idx = base_idx * 64 + first_free;
-    let offset = idx * layout_size;
+    let offset = idx * layout.size();
     let addr = base_addr + offset;
-    if offset <= (page_size - metadata_size - layout_size) && addr % layout_align == 0 {
+    if offset <= (page_size - metadata_size - layout.size()) && addr % layout.align() == 0 {
         Some((idx, addr))
     } else {None}
 }
 
 #[requires(forall(|i: usize| i < bitfield.len() ==> bitfield[i].0 <= U64_MAX))]
-#[requires(layout_size > 0)]
-#[requires(layout_align > 0)]
+#[requires(layout.size() > 0)]
+#[requires(layout.align() > 0)]
 #[ensures(result.is_some() ==> {  // Check that the returned index is within range and that the address is correct.
     let (idx, addr) = peek_option(&result);
-    idx < bitfield.len() * 64 && addr == base_addr + idx * layout_size
+    idx < bitfield.len() * 64 && addr == base_addr + idx * layout.size()
 })]
 #[ensures(result.is_some() ==> {  // Check that the returned address does not overlap with metadata.
     let (idx, addr) = peek_option(&result);
-    addr - base_addr <= page_size - metadata_size - layout_size && addr % layout_align == 0
+    addr - base_addr <= page_size - metadata_size - layout.size() && addr % layout.align() == 0
 })]
 #[ensures(result.is_some() ==> {  // Ensure that all u64 before the returned index is full. The result being the first free bit of its u64 is already guaranteed by `first_fit_in_u64`.
     let (idx, addr) = peek_option(&result);
@@ -530,8 +576,7 @@ fn first_fit_in_u64 (
 fn first_fit(
     bitfield: &[AtomicU64],
     base_addr: usize,
-    layout_size: usize,
-    layout_align: usize,
+    layout: Layout,
     page_size: usize,
     metadata_size: usize
 ) -> Option<(usize, usize)> {
@@ -544,7 +589,7 @@ fn first_fit(
 
         let current_val = bitfield[base_idx].load(Ordering::Relaxed);
         if current_val < U64_MAX {
-            return first_fit_in_u64(current_val, base_idx, base_addr, layout_size, layout_align, page_size, metadata_size)
+            return first_fit_in_u64(current_val, base_idx, base_addr, layout, page_size, metadata_size)
         }
 
         prusti_assert!(current_val == U64_MAX);
@@ -564,16 +609,11 @@ fn first_fit(
 
 #[invariant(self.relevant_bits <= self.bitfield.len() * 64)]  // The number of used bits cannot exceed the maximum number of available bits.
 #[invariant(self.relevant_bits > 0)]  // The number of used bits should be more than 0.
-#[invariant(self.layout_align > 0)]
-#[invariant(self.layout_size > 0)]
-#[invariant(self.layout_align.is_power_of_two())]
-#[invariant(self.layout_size % self.layout_align == 0)]
 pub struct TrustedBitfield8 {  // Change name for other bitfield types
     bitfield: [AtomicU64; TrustedBitfield8::SIZE],  // Change name for other bitfield sizes
     relevant_bits: usize,
     base_addr: usize,
-    layout_size: usize,
-    layout_align: usize,
+    layout: Layout,
     page_size: usize,
     metadata_size: usize,
     dealloc_callback_generated: bool
@@ -584,7 +624,7 @@ impl TrustedBitfield8 {
 
     // Unexposed functions that should not be called by themselves
     fn initialize(&mut self) {initialize(&mut self.bitfield, self.relevant_bits)}
-    fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout_size, self.layout_align, self.page_size, self.metadata_size)}
+    fn first_fit(&self) -> Option<(usize, usize)> {first_fit(&self.bitfield, self.base_addr, self.layout, self.page_size, self.metadata_size)}
     fn set_bit(&self, idx: usize) -> bool {set_bit(&self.bitfield, idx)}
     fn clear_bit(&self, idx: usize) -> bool {clear_bit(&self.bitfield, idx)}
 
@@ -600,16 +640,11 @@ impl TrustedBitfield8 {
         for_size: usize,
         capacity: usize,
         base_addr: usize,
-        layout_size: usize,
-        layout_align: usize,
+        layout: Layout,
         page_size: usize,
         metadata_size: usize
     ) -> Option<Self> {
-        let valid_args =
-            for_size > 0 && capacity > 0 && for_size < capacity &&
-            layout_align > 0 && layout_size > 0 &&
-            layout_align.is_power_of_two() && layout_size % layout_align == 0;
-        if valid_args {
+        if for_size > 0 && capacity > 0 && for_size < capacity {
             let bitfield =
                 [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
                 AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];  // Change this for other bitfield sizes
@@ -617,7 +652,7 @@ impl TrustedBitfield8 {
             let wanted_bits = capacity / for_size;
             let relevant_bits = if wanted_bits <= available_bits {wanted_bits} else {available_bits};
             let mut trusted_bitfield = TrustedBitfield8 {  // Change this for other bitfield types
-                bitfield, relevant_bits, base_addr, layout_size, layout_align, page_size, metadata_size,
+                bitfield, relevant_bits, base_addr, layout, page_size, metadata_size,
                 dealloc_callback_generated: false
             };
             trusted_bitfield.initialize();
@@ -632,7 +667,7 @@ impl TrustedBitfield8 {
     }
     pub fn clear_verified_addr(&self, addr: VerifiedDeallocAddr) -> bool {  // Should take ownership of the VerifiedDeallocAddr
         if addr.0 >= self.base_addr {
-            self.clear_bit((addr.0 - self.base_addr) / self.layout_size)
+            self.clear_bit((addr.0 - self.base_addr) / self.layout.size())
         } else {false}
     }
     pub fn is_allocated(&self, idx: usize) -> Option<bool> {is_allocated(&self.bitfield, idx)}

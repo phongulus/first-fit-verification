@@ -47,3 +47,12 @@ pub(crate) fn peek_option_ref<T>(val: &Option<T>) -> &T {
         None => unreachable!(),
     }
 }
+
+#[pure]
+#[requires(val.is_ok())]
+pub(crate) fn peek_result<T: Copy, E>(val: &Result<T, E>) -> T {
+    match val {
+        Ok(val) => *val,
+        Err(_) => unreachable!(),
+    }
+}
