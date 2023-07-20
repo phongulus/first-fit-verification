@@ -235,7 +235,11 @@ fn initialize(bitfield: &[AtomicU64], relevant_bits: usize) {
                 prusti_assert!(forall(|j: usize| j < remaining_bits ==> !is_allocated_u64(&bitfield[i].0, j)));
                 prusti_assert!(forall(|j: usize| (j >= remaining_bits && j < 64) ==> is_allocated_u64(&bitfield[i].0, j)));
             }
-        } else {bitfield[i].store(max_u64, Ordering::Relaxed);}
+        } else {
+            bitfield[i].store(max_u64, Ordering::Relaxed);
+            prusti_assert!(i * 64 >= relevant_bits);
+            prusti_assert!(bitfield[i].0 == u64::MAX);
+        }
 
         prusti_assert!(i * 64 >= relevant_bits ==> bitfield[i].0 == U64_MAX);
         prusti_assert!((i + 1) * 64 <= relevant_bits ==> bitfield[i].0 == 0);
